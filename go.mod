@@ -1,4 +1,4 @@
-module github.com/rshelekhov/sso-jwt
+module github.com/rshelekhov/jwtauth
 
 go 1.22.1
 
