@@ -1,4 +1,4 @@
-package sso_jwt
+package jwtauth
 
 import (
 	"encoding/json"
