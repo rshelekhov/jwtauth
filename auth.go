@@ -10,7 +10,7 @@ import (
 )
 
 type TokenService struct {
-	string
+	SignKey                  string
 	SigningMethod            jwt.SigningMethod
 	AccessTokenTTL           time.Duration
 	RefreshTokenTTL          time.Duration
@@ -21,6 +21,7 @@ type TokenService struct {
 }
 
 func NewJWTokenService(
+	signKey string,
 	signingMethod jwt.SigningMethod,
 	accessTokenTTL time.Duration,
 	refreshTokenTTL time.Duration,
@@ -30,6 +31,7 @@ func NewJWTokenService(
 	passwordHashSalt string,
 ) *TokenService {
 	return &TokenService{
+		SignKey:                  signKey,
 		SigningMethod:            signingMethod,
 		AccessTokenTTL:           accessTokenTTL,
 		RefreshTokenTTL:          refreshTokenTTL,
@@ -63,7 +65,7 @@ func (j *TokenService) NewAccessToken(additionalClaims map[string]interface{}, s
 
 	token := jwt.NewWithClaims(j.SigningMethod, claims)
 
-	return token.SignedString([]byte(signKey))
+	return token.SignedString([]byte(j.SignKey))
 }
 
 func (j *TokenService) NewRefreshToken() (string, error) {
