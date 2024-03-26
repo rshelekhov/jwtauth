@@ -31,14 +31,14 @@ const (
 	ContextUserID = "user_id"
 )
 
-func Verifier(j *TokenService) func(http.Handler) http.Handler {
-	return j.Verify(GetTokenFromHeader, GetTokenFromCookie, GetTokenFromQuery)
+func Verifier() func(http.Handler) http.Handler {
+	return verify(GetTokenFromHeader, GetTokenFromCookie, GetTokenFromQuery)
 }
 
-func (j *TokenService) Verify(findTokenFns ...func(r *http.Request) string) func(http.Handler) http.Handler {
+func verify(findTokenFns ...func(r *http.Request) string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			token, err := j.FindToken(r, findTokenFns...)
+			token, err := findToken(r, findTokenFns...)
 			if errors.Is(err, ErrNoTokenFound) {
 				http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 				return
@@ -52,7 +52,7 @@ func (j *TokenService) Verify(findTokenFns ...func(r *http.Request) string) func
 	}
 }
 
-func (j *TokenService) FindToken(r *http.Request, findTokenFns ...func(r *http.Request) string) (*jwt.Token, error) {
+func findToken(r *http.Request, findTokenFns ...func(r *http.Request) string) (*jwt.Token, error) {
 	var accessTokenString string
 
 	for _, fn := range findTokenFns {
@@ -66,7 +66,7 @@ func (j *TokenService) FindToken(r *http.Request, findTokenFns ...func(r *http.R
 		return nil, ErrNoTokenFound
 	}
 
-	return j.VerifyToken(accessTokenString)
+	return verifyToken(accessTokenString)
 }
 
 func FindRefreshToken(r *http.Request) (string, error) {
@@ -85,8 +85,11 @@ func FindRefreshToken(r *http.Request) (string, error) {
 	return refreshToken, nil
 }
 
-func (j *TokenService) VerifyToken(accessTokenString string) (*jwt.Token, error) {
-	token, err := j.DecodeToken(accessTokenString)
+func verifyToken(accessTokenString string) (*jwt.Token, error) {
+	// TODO: get public key from auth service (think about the better way to do it)
+	var publicKey string
+
+	token, err := decodeToken(accessTokenString, publicKey)
 	if err != nil {
 		return nil, Errors(err)
 	}
@@ -100,18 +103,18 @@ func (j *TokenService) VerifyToken(accessTokenString string) (*jwt.Token, error)
 
 // func (j *TokenService) EncodeToken
 
-func (j *TokenService) DecodeToken(accessTokenString string) (*jwt.Token, error) {
-	return j.ParseToken(accessTokenString)
+func decodeToken(accessTokenString, publicKey string) (*jwt.Token, error) {
+	return parseToken(accessTokenString, publicKey)
 }
 
-func (j *TokenService) ParseToken(accessTokenString string) (*jwt.Token, error) {
+func parseToken(accessTokenString, publicKey string) (*jwt.Token, error) {
 	token, err := jwt.Parse(accessTokenString, func(token *jwt.Token) (interface{}, error) {
 		// TODO: add signing method to TokenService
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("%v: %v", ErrUnexpectedSigningMethod, token.Header["alg"])
 		}
 
-		return []byte(j.SignKey), nil
+		return []byte(publicKey), nil
 	})
 	if err != nil {
 		return nil, err
