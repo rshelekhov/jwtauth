@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rsa"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -16,7 +15,6 @@ import (
 
 	"github.com/rshelekhov/jwtauth/lib/cache"
 	ssogrpc "github.com/rshelekhov/sso-grpc-client"
-	"google.golang.org/grpc/metadata"
 
 	ssov1 "github.com/rshelekhov/sso-protos/gen/go/sso"
 )
@@ -36,31 +34,12 @@ func New(ssoClient *ssogrpc.Client, appID string) *TokenService {
 	}
 }
 
-var (
-	ErrUnauthorized             = errors.New("unauthorized")
-	ErrNoTokenFound             = errors.New("no token found")
-	ErrInvalidToken             = errors.New("invalid token")
-	ErrUnexpectedSigningMethod  = errors.New("unexpected signing method")
-	ErrTokenNotFoundInCtx       = errors.New("token not found in context")
-	ErrUserIDNotFoundInCtx      = errors.New("user id not found in context")
-	ErrAccessTokenNotFoundInCtx = errors.New("access token not found in context")
-	ErrFailedToParseTokenClaims = errors.New("failed to parse token claims from context")
-	ErrKidNotFoundInTokenHeader = errors.New("kid not found in token header")
-	ErrKidIsNotAString          = errors.New("kid is not a string")
-)
-
 const (
 	AccessTokenKey  = "access_token"
 	RefreshTokenKey = "refresh_token"
 	UserID          = "user_id"
 	JWKS            = "jwks"
 	Kid             = "kid"
-)
-
-type contextKey string
-
-const (
-	AccessTokenCtxKey contextKey = "access_token"
 )
 
 // Verify verifies the presence of a JWT token using multiple strategies (header, cookie, query).
@@ -92,7 +71,6 @@ func (j *TokenService) Verify(findTokenFns ...func(r *http.Request) string) func
 }
 
 // FindToken searches for a JWT token using the provided search functions (e.g., header, cookie, query).
-// It returns the token if found and valid, otherwise it returns an error.
 func (j *TokenService) FindToken(r *http.Request, findTokenFns ...func(r *http.Request) string) (string, error) {
 	var accessTokenString string
 
@@ -115,7 +93,6 @@ func (j *TokenService) FindToken(r *http.Request, findTokenFns ...func(r *http.R
 }
 
 // FindRefreshToken attempts to retrieve the refresh token from the request (header or cookie).
-// It returns an error if the refresh token cannot be found or an error occurs during retrieval.
 func FindRefreshToken(r *http.Request) (string, error) {
 	refreshToken, err := GetRefreshTokenFromHeader(r)
 	if err != nil {
@@ -263,15 +240,6 @@ func (j *TokenService) GetClaimsFromToken(ctx context.Context) (map[string]inter
 	return claims, nil
 }
 
-func GetTokenFromContext(ctx context.Context) (string, error) {
-	token, ok := ctx.Value(AccessTokenCtxKey).(string)
-	if !ok {
-		return "", ErrTokenNotFoundInCtx
-	}
-
-	return token, nil
-}
-
 func (j *TokenService) GetUserID(ctx context.Context) (string, error) {
 	claims, err := j.GetClaimsFromToken(ctx)
 	if err != nil {
@@ -284,86 +252,4 @@ func (j *TokenService) GetUserID(ctx context.Context) (string, error) {
 	}
 
 	return userID.(string), nil
-}
-
-func AddAccessTokenToMetadata(ctx context.Context) (context.Context, error) {
-	accessToken, ok := ctx.Value(AccessTokenCtxKey).(string)
-	if !ok {
-		return nil, ErrAccessTokenNotFoundInCtx
-	}
-
-	md := metadata.Pairs(AccessTokenKey, accessToken)
-
-	newCtx := metadata.NewOutgoingContext(ctx, md)
-
-	return newCtx, nil
-}
-
-func SetTokenCookie(w http.ResponseWriter, name, value, domain, path string, expiresAt time.Time, httpOnly bool) {
-	http.SetCookie(w, &http.Cookie{
-		Name:     name,
-		Value:    value,
-		Domain:   domain,
-		Path:     path,
-		Expires:  expiresAt,
-		HttpOnly: httpOnly,
-	})
-}
-
-func SetRefreshTokenCookie(w http.ResponseWriter, refreshToken, domain, path string, expiresAt time.Time, httpOnly bool) {
-	SetTokenCookie(w, RefreshTokenKey, refreshToken, domain, path, expiresAt, httpOnly)
-}
-
-func SendTokensToWeb(w http.ResponseWriter, data *ssov1.TokenData, httpStatus int) {
-	SetRefreshTokenCookie(w,
-		data.GetRefreshToken(),
-		data.GetDomain(),
-		data.GetPath(),
-		data.GetExpiresAt().AsTime(),
-		data.GetHttpOnly(),
-	)
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(httpStatus)
-
-	responseBody := map[string]string{AccessTokenKey: data.AccessToken}
-
-	if len(data.AdditionalFields) > 0 {
-		for key, value := range data.AdditionalFields {
-			responseBody[key] = value
-		}
-	}
-
-	if err := json.NewEncoder(w).Encode(responseBody); err != nil {
-		return
-	}
-}
-
-func SendTokensToMobileApp(w http.ResponseWriter, data *ssov1.TokenData, httpStatus int) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(httpStatus)
-
-	responseBody := map[string]string{AccessTokenKey: data.AccessToken, RefreshTokenKey: data.RefreshToken}
-
-	if len(data.AdditionalFields) > 0 {
-		for key, value := range data.AdditionalFields {
-			responseBody[key] = value
-		}
-	}
-
-	if err := json.NewEncoder(w).Encode(responseBody); err != nil {
-		return
-	}
-}
-
-func Errors(err error) error {
-	switch {
-	case errors.Is(err, jwt.ErrTokenExpired):
-		return jwt.ErrTokenExpired
-	case errors.Is(err, jwt.ErrSignatureInvalid):
-		return jwt.ErrSignatureInvalid
-	case errors.Is(err, jwt.ErrTokenNotValidYet):
-		return jwt.ErrTokenNotValidYet
-	default:
-		return ErrUnauthorized
-	}
 }
