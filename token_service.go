@@ -195,7 +195,7 @@ func (j *TokenService) GetJWKS(ctx context.Context) ([]*ssov1.JWK, error) {
 		copy(jwks, cachedJWKS)
 	} else {
 		jwksResponse, err := j.ssoClient.Api.GetJWKS(ctx, &ssov1.GetJWKSRequest{
-			AppID: j.AppID,
+			AppId: j.AppID,
 		})
 		if err != nil {
 			return nil, err
