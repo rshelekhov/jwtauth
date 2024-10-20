@@ -6,6 +6,8 @@ github.com/rshelekhov/sso-grpc-client v0.0.0-20241009100253-cd58343daa1c h1:U7oK
 github.com/rshelekhov/sso-grpc-client v0.0.0-20241009100253-cd58343daa1c/go.mod h1:Eqlo87DeztCm81OlwqJnkIwHzc5sNWdNa7ckG+dZqpU=
 github.com/rshelekhov/sso-protos v0.0.35 h1:q7lxPO78fG98C8swAHCfFA0Iydyny/mA7cvLlwtLzdk=
 github.com/rshelekhov/sso-protos v0.0.35/go.mod h1:cJQeclzMGqy+EIiUedReMRsKdyPFtgfiM5OvswDwn+E=
+github.com/rshelekhov/sso-protos v0.1.3 h1:SjaRW9/0ousYTp3aSl3CP5Kwo+EIWYej+S3g42PTxrY=
+github.com/rshelekhov/sso-protos v0.1.3/go.mod h1:03m8uCo2HxayExPbOPHrKnZcdNR+zvAXoIAE6BFUezo=
 golang.org/x/net v0.28.0 h1:a9JDOJc5GMUJ0+UDqmLT86WiEy7iWyIhz8gz8E4e5hE=
 golang.org/x/net v0.28.0/go.mod h1:yqtgsTWOOnlGLG9GFRrK3++bGOUEkNBoHZc8MEDWPNg=
 golang.org/x/net v0.30.0 h1:AcW1SDZMkb8IpzCdQUaIq2sP4sZ4zw+55h6ynffypl4=
