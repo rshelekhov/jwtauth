@@ -14,7 +14,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 
 	"github.com/rshelekhov/jwtauth/lib/cache"
-	ssogrpc "github.com/rshelekhov/sso-grpc-client"
+	ssogrpc "github.com/rshelekhov/sso-gateway/pkg/clients/sso/grpc"
 
 	ssov1 "github.com/rshelekhov/sso-protos/gen/go/sso"
 )
