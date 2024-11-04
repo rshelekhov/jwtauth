@@ -5,9 +5,18 @@ import (
 	"net/http"
 	"strings"
 	"time"
-
-	ssov1 "github.com/rshelekhov/sso-protos/gen/go/sso"
 )
+
+// TokenData represents the structure for JWT token and related configuration data
+type TokenData struct {
+	AccessToken      string            `json:"access_token"`      // JWT access token
+	RefreshToken     string            `json:"refresh_token"`     // Refresh token for token renewal
+	Domain           string            `json:"domain"`            // Cookie domain (optional)
+	Path             string            `json:"path"`              // Cookie path (optional)
+	ExpiresAt        time.Time         `json:"expires_at"`        // Token expiration time
+	HttpOnly         bool              `json:"http_only"`         // HttpOnly flag for cookies
+	AdditionalFields map[string]string `json:"additional_fields"` // Additional data to be included in response
+}
 
 // GetTokenFromHeader retrieves the JWT token from the "Authorization" HTTP header.
 // It expects the token to be in the format "Bearer <token>".
@@ -63,29 +72,24 @@ func GetTokenFromQuery(r *http.Request) string {
 	return r.URL.Query().Get(AccessTokenKey)
 }
 
-func SetTokenCookie(w http.ResponseWriter, name, value, domain, path string, expiresAt time.Time, httpOnly bool) {
+// SetRefreshTokenCookie sets the refresh token in an HTTP cookie with the provided configuration data.
+// The cookie will be set with the specified domain, path, expiration time, and HttpOnly flag.
+func SetRefreshTokenCookie(w http.ResponseWriter, data *TokenData) {
 	http.SetCookie(w, &http.Cookie{
-		Name:     name,
-		Value:    value,
-		Domain:   domain,
-		Path:     path,
-		Expires:  expiresAt,
-		HttpOnly: httpOnly,
+		Name:     RefreshTokenKey,
+		Value:    data.RefreshToken,
+		Domain:   data.Domain,
+		Path:     data.Path,
+		Expires:  data.ExpiresAt,
+		HttpOnly: data.HttpOnly,
 	})
 }
 
-func SetRefreshTokenCookie(w http.ResponseWriter, refreshToken, domain, path string, expiresAt time.Time, httpOnly bool) {
-	SetTokenCookie(w, RefreshTokenKey, refreshToken, domain, path, expiresAt, httpOnly)
-}
-
-func SendTokensToWeb(w http.ResponseWriter, data *ssov1.TokenData, httpStatus int) {
-	SetRefreshTokenCookie(w,
-		data.GetRefreshToken(),
-		data.GetDomain(),
-		data.GetPath(),
-		data.GetExpiresAt().AsTime(),
-		data.GetHttpOnly(),
-	)
+// SendTokensToWeb sends access and refresh tokens to web clients.
+// The refresh token is set in an HTTP cookie, while the access token and any additional fields
+// are sent in the JSON response body. This approach is suitable for web applications.
+func SendTokensToWeb(w http.ResponseWriter, data *TokenData, httpStatus int) {
+	SetRefreshTokenCookie(w, data)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(httpStatus)
 
@@ -102,11 +106,17 @@ func SendTokensToWeb(w http.ResponseWriter, data *ssov1.TokenData, httpStatus in
 	}
 }
 
-func SendTokensToMobileApp(w http.ResponseWriter, data *ssov1.TokenData, httpStatus int) {
+// SendTokensToMobileApp sends both access and refresh tokens in the JSON response body.
+// This approach is suitable for mobile applications where cookie storage might not be optimal.
+// Additional fields can be included in the response if specified in the TokenData.
+func SendTokensToMobileApp(w http.ResponseWriter, data *TokenData, httpStatus int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(httpStatus)
 
-	responseBody := map[string]string{AccessTokenKey: data.AccessToken, RefreshTokenKey: data.RefreshToken}
+	responseBody := map[string]string{
+		AccessTokenKey:  data.AccessToken,
+		RefreshTokenKey: data.RefreshToken,
+	}
 
 	if len(data.AdditionalFields) > 0 {
 		for key, value := range data.AdditionalFields {
