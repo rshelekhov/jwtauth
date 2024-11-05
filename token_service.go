@@ -18,9 +18,9 @@ import (
 // TokenService handles JWT token operations including verification and parsing
 // using JSON Web Key Sets (JWKS) for signature validation
 type TokenService struct {
-	jwksURL   string       // URL to fetch JWKS from auth service
-	jwksCache *cache.Cache // Cache to store JWKS
-	mu        sync.RWMutex // Mutex for thread-safe cache operations
+	jwksEndpoint string       // URL to fetch JWKS from auth service (optional)
+	jwksCache    *cache.Cache // Cache to store JWKS
+	mu           sync.RWMutex // Mutex for thread-safe cache operations
 }
 
 // JWK represents a JSON Web Key structure containing the necessary fields
@@ -39,11 +39,27 @@ type JWKSResponse struct {
 	Keys []JWK `json:"keys"`
 }
 
-// New creates a new instance of TokenService with the specified JWKS URL
-func New(jwksURL string) *TokenService {
-	return &TokenService{
-		jwksURL:   jwksURL,
+// New creates a new instance of TokenService with the specified options.
+// If no options are provided, the default values are used.
+// JWKS URL is empty by default.
+func New(opts ...TokenServiceOption) *TokenService {
+	ts := &TokenService{
 		jwksCache: cache.New(),
+	}
+
+	for _, opt := range opts {
+		opt(ts)
+	}
+
+	return ts
+}
+
+type TokenServiceOption func(service *TokenService)
+
+// WithJWKSEndpoint specifies the URL to fetch JWKS from auth service
+func WithJWKSEndpoint(url string) TokenServiceOption {
+	return func(s *TokenService) {
+		s.jwksEndpoint = url
 	}
 }
 
@@ -237,7 +253,11 @@ func (j *TokenService) getJWK(ctx context.Context, kid string) (*JWK, error) {
 func (j *TokenService) updateJWKS(ctx context.Context) error {
 	const op = "jwtauth.TokenService.updateJWKS"
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, j.jwksURL, nil)
+	if j.jwksEndpoint == "" {
+		return fmt.Errorf("%s: JWKS endpoint not configured for TokenService", op)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, j.jwksEndpoint, nil)
 	if err != nil {
 		return fmt.Errorf("%s: failed to create request: %w", op, err)
 	}
