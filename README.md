@@ -35,8 +35,13 @@ import (
 )
 
 func main() {
-    // Initialize the token service with your JWKS URL
-    tokenService := jwtauth.New("https://your-auth-server/.well-known/jwks.json")
+    // Initialize the token service without JWKS Endpoint
+    tokenService := jwtauth.New()
+    
+    // Initialize the token service with your JWKS Endpoint
+    tokenService := jwtauth.New(
+        jwtauth.WithJWKSEndpoint("https://your-auth-server/.well-known/jwks.json",
+    )
 
     // Use the built-in middleware
     http.Handle("/protected", 
