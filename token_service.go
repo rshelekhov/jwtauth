@@ -18,9 +18,18 @@ import (
 // TokenService handles JWT token operations including verification and parsing
 // using JSON Web Key Sets (JWKS) for signature validation
 type TokenService struct {
-	jwksEndpoint string       // URL to fetch JWKS from auth service (optional)
-	jwksCache    *cache.Cache // Cache to store JWKS
-	mu           sync.RWMutex // Mutex for thread-safe cache operations
+	// Application ID for verification tokens
+	// Use in the middleware to verify tokens
+	appID string
+
+	// URL to fetch JWKS from auth service (optional)
+	jwksEndpoint string
+
+	// Cache to store JWKS
+	jwksCache *cache.Cache
+
+	// Mutex for thread-safe cache operations
+	mu sync.RWMutex
 }
 
 // JWK represents a JSON Web Key structure containing the necessary fields
@@ -63,8 +72,17 @@ func WithJWKSEndpoint(url string) TokenServiceOption {
 	}
 }
 
+// WithAppID specifies the application ID for verification tokens middleware
+func WithAppID(appID string) TokenServiceOption {
+	return func(s *TokenService) {
+		s.appID = appID
+	}
+}
+
 // Common constants used throughout the package
 const (
+	AppIDHeader     = "X-App-ID"
+	AppIDCtxKey     = "app_id"
 	AccessTokenKey  = "access_token"
 	RefreshTokenKey = "refresh_token"
 	UserID          = "user_id"
@@ -78,6 +96,20 @@ const (
 func (j *TokenService) Verify(findTokenFns ...func(r *http.Request) string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+
+			ctx := r.Context()
+
+			if j.appID == "" {
+				// We verify tokens in the SSO Gateway, so we need to get the appID from the header request
+				var appIDFromRequest string
+
+				if appIDFromRequest = r.Header.Get(AppIDHeader); appIDFromRequest == "" {
+					http.Error(w, ErrNoAppIDFoundInHeaderRequest.Error(), http.StatusUnauthorized)
+				}
+
+				ctx = context.WithValue(ctx, AppIDCtxKey, appIDFromRequest)
+			}
+
 			accessToken, err := j.FindToken(r, findTokenFns...)
 			if err != nil {
 				if errors.Is(err, ErrNoTokenFound) {
@@ -91,7 +123,7 @@ func (j *TokenService) Verify(findTokenFns ...func(r *http.Request) string) func
 			}
 
 			// Store the access token in the request context
-			ctx := context.WithValue(r.Context(), AccessTokenCtxKey, accessToken)
+			ctx = context.WithValue(r.Context(), AccessTokenCtxKey, accessToken)
 
 			// Proceed with the request using the modified context
 			next.ServeHTTP(w, r.WithContext(ctx))
@@ -205,9 +237,18 @@ func (j *TokenService) ParseToken(ctx context.Context, accessTokenString string)
 func (j *TokenService) getJWK(ctx context.Context, kid string) (*JWK, error) {
 	const op = "jwtauth.TokenService.getJWK"
 
+	// Define which appID to use to get JWKS
+	appID, err := j.getAppID(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", op, err)
+	}
+
+	// Construct cache key using appID
+	cacheKey := fmt.Sprintf("%s:%s", JWKS, appID)
+
 	// Try to get JWKS from cache first
 	j.mu.RLock()
-	cacheValue, found := j.jwksCache.Get(JWKS)
+	cacheValue, found := j.jwksCache.Get(cacheKey)
 	j.mu.RUnlock()
 
 	var jwks []JWK
@@ -219,12 +260,12 @@ func (j *TokenService) getJWK(ctx context.Context, kid string) (*JWK, error) {
 
 	// If not in cache or cache miss, fetch new JWKS from URL
 	if len(jwks) == 0 {
-		if err := j.updateJWKS(ctx); err != nil {
+		if err := j.updateJWKS(ctx, appID); err != nil {
 			return nil, fmt.Errorf("%s: failed to update JWKS: %w", op, err)
 		}
 
 		j.mu.RLock()
-		cachedValue, found := j.jwksCache.Get(JWKS)
+		cachedValue, found := j.jwksCache.Get(cacheKey)
 		j.mu.RUnlock()
 
 		if !found {
@@ -248,9 +289,23 @@ func (j *TokenService) getJWK(ctx context.Context, kid string) (*JWK, error) {
 	return nil, fmt.Errorf("%s: JWK with kid %s not found", op, kid)
 }
 
+// getAppID returns the appID from the TokenService struct or context.
+// If the appID is not found returns an error
+func (j *TokenService) getAppID(ctx context.Context) (string, error) {
+	if appID := j.appID; appID != "" {
+		return appID, nil
+	}
+
+	// We try to get appID from context in case we are in the SSO Gateway
+	if appIDFromCtx, ok := ctx.Value(AppIDCtxKey).(string); ok {
+		return appIDFromCtx, nil
+	}
+	return "", ErrAppIDNotFoundInCtx
+}
+
 // updateJWKS fetches fresh JWKS from the configured URL and updates the cache
 // Returns an error if the fetch or update fails
-func (j *TokenService) updateJWKS(ctx context.Context) error {
+func (j *TokenService) updateJWKS(ctx context.Context, appID string) error {
 	const op = "jwtauth.TokenService.updateJWKS"
 
 	if j.jwksEndpoint == "" {
@@ -261,6 +316,12 @@ func (j *TokenService) updateJWKS(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("%s: failed to create request: %w", op, err)
 	}
+
+	if appID == "" {
+		return fmt.Errorf("%s: appID is empty", op)
+	}
+
+	req.Header.Set(AppIDHeader, appID)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -277,8 +338,11 @@ func (j *TokenService) updateJWKS(ctx context.Context) error {
 		return fmt.Errorf("%s: failed to decode JWKS response: %w", op, err)
 	}
 
+	// Construct cache key using appID
+	cacheKey := fmt.Sprintf("%s:%s", JWKS, appID)
+
 	j.mu.RLock()
-	j.jwksCache.Set(JWKS, jwksResponse.Keys, cache.DefaultExpiration)
+	j.jwksCache.Set(cacheKey, jwksResponse.Keys, cache.DefaultExpiration)
 	j.mu.RUnlock()
 
 	return nil
