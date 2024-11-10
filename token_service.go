@@ -199,6 +199,14 @@ func (j *TokenService) VerifyToken(ctx context.Context, accessTokenString string
 // ParseToken parses the given access token string and validates it using the public keys (JWKS).
 // It checks the "kid" (key ID) in the token header to select the appropriate public key.
 func (j *TokenService) ParseToken(ctx context.Context, accessTokenString string) (*jwt.Token, error) {
+	const op = "jwtauth.ParseToken"
+
+	// Define which appID to use to get JWKS
+	appID, err := j.getAppID(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", op, err)
+	}
+
 	return jwt.Parse(accessTokenString, func(token *jwt.Token) (interface{}, error) {
 		kidRaw, ok := token.Header[Kid]
 		if !ok {
@@ -212,7 +220,7 @@ func (j *TokenService) ParseToken(ctx context.Context, accessTokenString string)
 
 		log.Printf("appID in context (jwt.Parse method): %v", ctx.Value(AppIDCtxKey))
 
-		jwk, err := j.getJWK(ctx, kid)
+		jwk, err := j.getJWK(ctx, kid, appID)
 		if err != nil {
 			return nil, err
 		}
@@ -245,16 +253,10 @@ func (j *TokenService) ParseToken(ctx context.Context, accessTokenString string)
 
 // getJWK retrieves a JWK by its key ID (kid) from the cache or fetches new JWKS if needed
 // Returns the matching JWK or an error if not found
-func (j *TokenService) getJWK(ctx context.Context, kid string) (*JWK, error) {
+func (j *TokenService) getJWK(ctx context.Context, kid, appID string) (*JWK, error) {
 	const op = "jwtauth.TokenService.getJWK"
 
 	log.Printf("appID in context (getJWK method): %v", ctx.Value(AppIDCtxKey))
-
-	// Define which appID to use to get JWKS
-	appID, err := j.getAppID(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", op, err)
-	}
 
 	// Construct cache key using appID
 	cacheKey := fmt.Sprintf("%s:%s", JWKS, appID)
