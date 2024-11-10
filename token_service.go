@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/golang-jwt/jwt/v5"
+	"log"
 	"math/big"
 	"net/http"
 	"sync"
@@ -112,6 +113,8 @@ func (j *TokenService) Verify(findTokenFns ...func(r *http.Request) string) func
 				ctx = context.WithValue(ctx, AppIDCtxKey, j.appID)
 			}
 
+			log.Printf("appID in context (Verify method): %v", ctx.Value(AppIDCtxKey))
+
 			accessToken, err := j.FindToken(ctx, r, findTokenFns...)
 			if err != nil {
 				if errors.Is(err, ErrNoTokenFound) {
@@ -149,6 +152,8 @@ func (j *TokenService) FindToken(ctx context.Context, r *http.Request, findToken
 		return "", ErrNoTokenFound
 	}
 
+	log.Printf("appID in context (FindToken method): %v", ctx.Value(AppIDCtxKey))
+
 	if err := j.VerifyToken(ctx, accessTokenString); err != nil {
 		return "", err
 	}
@@ -177,6 +182,8 @@ func FindRefreshToken(r *http.Request) (string, error) {
 // VerifyToken checks the validity of the provided access token.
 // It parses the token, verifies the signature, and ensures it is not expired.
 func (j *TokenService) VerifyToken(ctx context.Context, accessTokenString string) error {
+	log.Printf("appID in context (Verify Token method): %v", ctx.Value(AppIDCtxKey))
+
 	token, err := j.ParseToken(ctx, accessTokenString)
 	if err != nil {
 		return Errors(err)
@@ -202,6 +209,8 @@ func (j *TokenService) ParseToken(ctx context.Context, accessTokenString string)
 		if !ok {
 			return nil, ErrKidIsNotAString
 		}
+
+		log.Printf("appID in context (jwt.Parse method): %v", ctx.Value(AppIDCtxKey))
 
 		jwk, err := j.getJWK(ctx, kid)
 		if err != nil {
@@ -238,6 +247,8 @@ func (j *TokenService) ParseToken(ctx context.Context, accessTokenString string)
 // Returns the matching JWK or an error if not found
 func (j *TokenService) getJWK(ctx context.Context, kid string) (*JWK, error) {
 	const op = "jwtauth.TokenService.getJWK"
+
+	log.Printf("appID in context (getJWK method): %v", ctx.Value(AppIDCtxKey))
 
 	// Define which appID to use to get JWKS
 	appID, err := j.getAppID(ctx)
