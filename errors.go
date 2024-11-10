@@ -7,16 +7,18 @@ import (
 )
 
 var (
-	ErrUnauthorized             = errors.New("unauthorized")
-	ErrNoTokenFound             = errors.New("no token found")
-	ErrInvalidToken             = errors.New("invalid token")
-	ErrUnexpectedSigningMethod  = errors.New("unexpected signing method")
-	ErrTokenNotFoundInCtx       = errors.New("token not found in context")
-	ErrUserIDNotFoundInCtx      = errors.New("user id not found in context")
-	ErrAccessTokenNotFoundInCtx = errors.New("access token not found in context")
-	ErrFailedToParseTokenClaims = errors.New("failed to parse token claims from context")
-	ErrKidNotFoundInTokenHeader = errors.New("kid not found in token header")
-	ErrKidIsNotAString          = errors.New("kid is not a string")
+	ErrUnauthorized                = errors.New("unauthorized")
+	ErrNoAppIDFoundInHeaderRequest = errors.New("no app id found in header request")
+	ErrAppIDNotFoundInCtx          = errors.New("app id not found in context")
+	ErrNoTokenFound                = errors.New("no token found")
+	ErrInvalidToken                = errors.New("invalid token")
+	ErrUnexpectedSigningMethod     = errors.New("unexpected signing method")
+	ErrTokenNotFoundInCtx          = errors.New("token not found in context")
+	ErrUserIDNotFoundInCtx         = errors.New("user id not found in context")
+	ErrAccessTokenNotFoundInCtx    = errors.New("access token not found in context")
+	ErrFailedToParseTokenClaims    = errors.New("failed to parse token claims from context")
+	ErrKidNotFoundInTokenHeader    = errors.New("kid not found in token header")
+	ErrKidIsNotAString             = errors.New("kid is not a string")
 )
 
 func Errors(err error) error {
