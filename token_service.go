@@ -97,25 +97,23 @@ const (
 func (j *TokenService) Verify(findTokenFns ...func(r *http.Request) string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-
 			ctx := r.Context()
+			var appID string
 
 			if j.appID == "" {
 				// We verify tokens in the SSO Gateway, so we need to get the appID from the header request
-				appIDFromHeader := r.Header.Get(AppIDHeader)
-				if appIDFromHeader == "" {
+				appID = r.Header.Get(AppIDHeader)
+				if appID == "" {
 					http.Error(w, ErrNoAppIDFoundInHeaderRequest.Error(), http.StatusUnauthorized)
 					return
 				}
-
-				ctx = context.WithValue(ctx, AppIDCtxKey, appIDFromHeader)
 			} else {
-				ctx = context.WithValue(ctx, AppIDCtxKey, j.appID)
+				appID = j.appID
 			}
 
 			log.Printf("appID in context (Verify method): %v", ctx.Value(AppIDCtxKey))
 
-			accessToken, err := j.FindToken(ctx, r, findTokenFns...)
+			accessToken, err := j.FindToken(ctx, r, appID, findTokenFns...)
 			if err != nil {
 				if errors.Is(err, ErrNoTokenFound) {
 					http.Error(w, ErrNoTokenFound.Error(), http.StatusUnauthorized)
@@ -138,7 +136,7 @@ func (j *TokenService) Verify(findTokenFns ...func(r *http.Request) string) func
 
 // FindToken searches for a JWT token using the provided search functions (e.g., header, cookie, query).
 // Returns the found token string or an error if no valid token is found.
-func (j *TokenService) FindToken(ctx context.Context, r *http.Request, findTokenFns ...func(r *http.Request) string) (string, error) {
+func (j *TokenService) FindToken(ctx context.Context, r *http.Request, appID string, findTokenFns ...func(r *http.Request) string) (string, error) {
 	var accessTokenString string
 
 	for _, fn := range findTokenFns {
@@ -154,7 +152,7 @@ func (j *TokenService) FindToken(ctx context.Context, r *http.Request, findToken
 
 	log.Printf("appID in context (FindToken method): %v", ctx.Value(AppIDCtxKey))
 
-	if err := j.VerifyToken(ctx, accessTokenString); err != nil {
+	if err := j.VerifyToken(ctx, appID, accessTokenString); err != nil {
 		return "", err
 	}
 
@@ -181,10 +179,10 @@ func FindRefreshToken(r *http.Request) (string, error) {
 
 // VerifyToken checks the validity of the provided access token.
 // It parses the token, verifies the signature, and ensures it is not expired.
-func (j *TokenService) VerifyToken(ctx context.Context, accessTokenString string) error {
+func (j *TokenService) VerifyToken(ctx context.Context, appID, accessTokenString string) error {
 	log.Printf("appID in context (Verify Token method): %v", ctx.Value(AppIDCtxKey))
 
-	token, err := j.ParseToken(ctx, accessTokenString)
+	token, err := j.ParseToken(ctx, appID, accessTokenString)
 	if err != nil {
 		return Errors(err)
 	}
@@ -198,15 +196,7 @@ func (j *TokenService) VerifyToken(ctx context.Context, accessTokenString string
 
 // ParseToken parses the given access token string and validates it using the public keys (JWKS).
 // It checks the "kid" (key ID) in the token header to select the appropriate public key.
-func (j *TokenService) ParseToken(ctx context.Context, accessTokenString string) (*jwt.Token, error) {
-	const op = "jwtauth.ParseToken"
-
-	// Define which appID to use to get JWKS
-	appID, err := j.getAppID(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", op, err)
-	}
-
+func (j *TokenService) ParseToken(ctx context.Context, appID, accessTokenString string) (*jwt.Token, error) {
 	return jwt.Parse(accessTokenString, func(token *jwt.Token) (interface{}, error) {
 		kidRaw, ok := token.Header[Kid]
 		if !ok {
@@ -365,13 +355,13 @@ func (j *TokenService) updateJWKS(ctx context.Context, appID string) error {
 
 // GetClaimsFromToken extracts the claims from the token in the current context
 // Returns the claims as a map or an error if the token is invalid or missing
-func (j *TokenService) GetClaimsFromToken(ctx context.Context) (map[string]interface{}, error) {
+func (j *TokenService) GetClaimsFromToken(ctx context.Context, appID string) (map[string]interface{}, error) {
 	accessToken, err := GetTokenFromContext(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	token, err := j.ParseToken(ctx, accessToken)
+	token, err := j.ParseToken(ctx, appID, accessToken)
 	if err != nil {
 		return nil, Errors(err)
 	}
@@ -386,8 +376,8 @@ func (j *TokenService) GetClaimsFromToken(ctx context.Context) (map[string]inter
 
 // GetUserID extracts the user ID from the token claims in the current context
 // Returns the user ID as a string or an error if not found
-func (j *TokenService) GetUserID(ctx context.Context) (string, error) {
-	claims, err := j.GetClaimsFromToken(ctx)
+func (j *TokenService) GetUserID(ctx context.Context, appID string) (string, error) {
+	claims, err := j.GetClaimsFromToken(ctx, appID)
 	if err != nil {
 		return "", err
 	}
