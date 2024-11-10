@@ -101,16 +101,18 @@ func (j *TokenService) Verify(findTokenFns ...func(r *http.Request) string) func
 
 			if j.appID == "" {
 				// We verify tokens in the SSO Gateway, so we need to get the appID from the header request
-				var appIDFromRequest string
-
-				if appIDFromRequest = r.Header.Get(AppIDHeader); appIDFromRequest == "" {
+				appIDFromHeader := r.Header.Get(AppIDHeader)
+				if appIDFromHeader == "" {
 					http.Error(w, ErrNoAppIDFoundInHeaderRequest.Error(), http.StatusUnauthorized)
+					return
 				}
 
-				ctx = context.WithValue(ctx, AppIDCtxKey, appIDFromRequest)
+				ctx = context.WithValue(ctx, AppIDCtxKey, appIDFromHeader)
+			} else {
+				ctx = context.WithValue(ctx, AppIDCtxKey, j.appID)
 			}
 
-			accessToken, err := j.FindToken(r, findTokenFns...)
+			accessToken, err := j.FindToken(ctx, r, findTokenFns...)
 			if err != nil {
 				if errors.Is(err, ErrNoTokenFound) {
 					http.Error(w, ErrNoTokenFound.Error(), http.StatusUnauthorized)
@@ -123,7 +125,7 @@ func (j *TokenService) Verify(findTokenFns ...func(r *http.Request) string) func
 			}
 
 			// Store the access token in the request context
-			ctx = context.WithValue(r.Context(), AccessTokenCtxKey, accessToken)
+			ctx = context.WithValue(ctx, AccessTokenCtxKey, accessToken)
 
 			// Proceed with the request using the modified context
 			next.ServeHTTP(w, r.WithContext(ctx))
@@ -133,7 +135,7 @@ func (j *TokenService) Verify(findTokenFns ...func(r *http.Request) string) func
 
 // FindToken searches for a JWT token using the provided search functions (e.g., header, cookie, query).
 // Returns the found token string or an error if no valid token is found.
-func (j *TokenService) FindToken(r *http.Request, findTokenFns ...func(r *http.Request) string) (string, error) {
+func (j *TokenService) FindToken(ctx context.Context, r *http.Request, findTokenFns ...func(r *http.Request) string) (string, error) {
 	var accessTokenString string
 
 	for _, fn := range findTokenFns {
@@ -147,7 +149,7 @@ func (j *TokenService) FindToken(r *http.Request, findTokenFns ...func(r *http.R
 		return "", ErrNoTokenFound
 	}
 
-	if err := j.VerifyToken(r.Context(), accessTokenString); err != nil {
+	if err := j.VerifyToken(ctx, accessTokenString); err != nil {
 		return "", err
 	}
 
