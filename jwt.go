@@ -4,205 +4,183 @@ import (
 	"context"
 	"crypto/rsa"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/golang-jwt/jwt/v5"
-	"log"
+	"github.com/rshelekhov/jwtauth/cache"
+	"google.golang.org/grpc/metadata"
 	"math/big"
 	"net/http"
+	"strings"
 	"sync"
-	"time"
-
-	"github.com/rshelekhov/jwtauth/lib/cache"
 )
 
-// TokenService handles JWT token operations including verification and parsing
-// using JSON Web Key Sets (JWKS) for signature validation
-type TokenService struct {
-	// Application ID for verification tokens
-	// Use in the middleware to verify tokens
-	appID string
-
-	// URL to fetch JWKS from auth service (optional)
-	jwksEndpoint string
-
+type manager struct {
 	// Cache to store JWKS
 	jwksCache *cache.Cache
 
 	// Mutex for thread-safe cache operations
 	mu sync.RWMutex
+
+	// App ID for verification tokens
+	// This is optional field is using in a services, authenticated by SSO
+	appID string
+
+	// URL to fetch JWKS from SSO service
+	// This is optional field is using in a services, authenticated by SSO
+	jwksURL string
+
+	// Domain for SSO service
+	// This is optional field is using in the SSO service
+	ssoDomain string
+
+	// Function to generate JWKS URL (optional)
+	// This is optional field is using in the SSO service
+	generateJWKSURL func(ssoDomain, appID string) string
 }
 
-// JWK represents a JSON Web Key structure containing the necessary fields
-// for RSA public key construction
-type JWK struct {
-	Alg string `json:"alg,omitempty"` // The specific cryptographic algorithm used with the key.
-	Kty string `json:"kty,omitempty"` // The family of cryptographic algorithms used with the key.
-	Use string `json:"use,omitempty"` // How the key was meant to be used; sig represents the signature
-	Kid string `json:"kid,omitempty"` // The unique identifier for the key.
-
-	// For RSA keys
-	N string `json:"n,omitempty"` // The modulus for the RSA public key
-	E string `json:"e,omitempty"` // The exponent for the RSA public key.
-}
-
-// JWKSResponse represents the structure of the JWKS endpoint response
-type JWKSResponse struct {
-	Keys []JWK         `json:"keys"`
-	TTL  time.Duration `json:"ttl"`
-}
-
-// New creates a new instance of TokenService with the specified options.
-// If no options are provided, the default values are used.
-// JWKS URL is empty by default.
-func New(opts ...TokenServiceOption) *TokenService {
-	ts := &TokenService{
+func NewManager(opts ...Option) Manager {
+	m := &manager{
 		jwksCache: cache.New(),
+		generateJWKSURL: func(ssoDomain, appID string) string {
+			return fmt.Sprintf("https://%s/%s/.well-known/jwks.json", ssoDomain, appID)
+		},
 	}
 
 	for _, opt := range opts {
-		opt(ts)
+		opt(m)
 	}
 
-	return ts
+	return m
 }
 
-type TokenServiceOption func(service *TokenService)
+type Option func(m *manager)
 
-// WithJWKSEndpoint specifies the URL to fetch JWKS from auth service
-func WithJWKSEndpoint(url string) TokenServiceOption {
-	return func(s *TokenService) {
-		s.jwksEndpoint = url
-	}
-}
-
-// WithAppID specifies the application ID for verification tokens middleware
-func WithAppID(appID string) TokenServiceOption {
-	return func(s *TokenService) {
-		s.appID = appID
+func WithAppID(appID string) Option {
+	return func(m *manager) {
+		m.appID = appID
 	}
 }
 
-// Common constants used throughout the package
+func WithJWKSURL(jwksURL string) Option {
+	return func(m *manager) {
+		m.jwksURL = jwksURL
+	}
+}
+
+func WithSSODomain(ssoDomain string) Option {
+	return func(m *manager) {
+		m.ssoDomain = ssoDomain
+	}
+}
+
+func WithJWKSURLGenerator(generator func(ssoDomain, appID string) string) Option {
+	return func(m *manager) {
+		m.generateJWKSURL = generator
+	}
+}
+
 const (
-	AppIDHeader     = "X-App-ID"
-	AppIDCtxKey     = "app_id"
+	AuthorizationHeader = "Authorization"
+	AccessTokenHeader   = "X-Access-Token"
+	AppIDHeader         = "X-App-ID"
+
 	AccessTokenKey  = "access_token"
 	RefreshTokenKey = "refresh_token"
-	UserID          = "user_id"
-	JWKS            = "jwks"
-	Kid             = "kid"
+	UserIDKey       = "user_id"
+
+	TokenCtxKey = "Token"
+
+	KidTokenHeader = "kid"
+	AlgTokenHeader = "alg"
 )
 
-// Verify verifies the presence of a JWT token using multiple strategies (header, cookie, query).
-// It validates the token and passes it to the next handler if successful, otherwise returns
-// an Unauthorized response.
-func (j *TokenService) Verify(findTokenFns ...func(r *http.Request) string) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ctx := r.Context()
-			var appID string
+var (
+	ErrInvalidToken  = errors.New("invalid token")
+	ErrTokenNotFound = errors.New("token not found")
+	ErrUnauthorized  = errors.New("unauthorized")
 
-			if j.appID == "" {
-				// We verify tokens in the SSO Gateway, so we need to get the appID from the header request
-				appID = r.Header.Get(AppIDHeader)
-				if appID == "" {
-					http.Error(w, ErrNoAppIDFoundInHeaderRequest.Error(), http.StatusUnauthorized)
-					return
-				}
-			} else {
-				appID = j.appID
-			}
+	ErrNoGRPCMetadata                           = errors.New("no gRPC metadata")
+	ErrAccessTokenHeaderNotFoundInGRPCMetadata  = errors.New("access token header not found in gRPC metadata")
+	ErrAuthorizationHeaderNotFoundInHTTPRequest = errors.New("authorization header not found in HTTP request")
+	ErrBearerTokenNotFound                      = errors.New("bearer token not found")
+	ErrAppIDHeaderNotFoundInGRPCMetadata        = errors.New("app ID header not found in gRPC metadata")
+	ErrAppIDHeaderNotFoundInHTTPRequest         = errors.New("app ID header not found in HTTP request")
 
-			log.Printf("appID in context (Verify method): %v", ctx.Value(AppIDCtxKey))
+	ErrKidNotFoundInTokenHeader = errors.New("kid not found in token header")
+	ErrKidIsNotAString          = errors.New("kid is not a string")
+	ErrUnexpectedSigningMethod  = errors.New("unexpected signing method")
 
-			accessToken, err := j.FindToken(ctx, r, appID, findTokenFns...)
-			if err != nil {
-				if errors.Is(err, ErrNoTokenFound) {
-					http.Error(w, ErrNoTokenFound.Error(), http.StatusUnauthorized)
-					return
-				}
+	ErrUserIDNotFoundInToken    = errors.New("user ID not found in token")
+	ErrTokenNotFoundInContext   = errors.New("token not found in context")
+	ErrFailedToParseTokenClaims = errors.New("failed to parse token claims")
+)
 
-				http.Error(w, err.Error(), http.StatusUnauthorized)
-
-				return
-			}
-
-			// Store the access token in the request context
-			ctx = context.WithValue(ctx, AccessTokenCtxKey, accessToken)
-
-			// Proceed with the request using the modified context
-			next.ServeHTTP(w, r.WithContext(ctx))
-		})
+// ExtractTokenFromGRPC retrieves the JWT token from gRPC metadata.
+// It expects the token to be in the "X-Access-Token" header.
+func (m *manager) ExtractTokenFromGRPC(ctx context.Context) (string, error) {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return "", ErrNoGRPCMetadata
 	}
+
+	values := md.Get(AccessTokenHeader)
+	if len(values) == 0 {
+		return "", ErrAccessTokenHeaderNotFoundInGRPCMetadata
+	}
+
+	return values[0], nil
 }
 
-// FindToken searches for a JWT token using the provided search functions (e.g., header, cookie, query).
-// Returns the found token string or an error if no valid token is found.
-func (j *TokenService) FindToken(ctx context.Context, r *http.Request, appID string, findTokenFns ...func(r *http.Request) string) (string, error) {
-	var accessTokenString string
-
-	for _, fn := range findTokenFns {
-		accessTokenString = fn(r)
-		if accessTokenString != "" {
-			break
-		}
+// ExtractTokenFromHTTP retrieves the JWT token from the "Authorization" HTTP header.
+// It expects the token to be in the format "Bearer <token>".
+func (m *manager) ExtractTokenFromHTTP(r *http.Request) (string, error) {
+	token := r.Header.Get(AuthorizationHeader)
+	if token == "" {
+		return "", ErrAuthorizationHeaderNotFoundInHTTPRequest
 	}
-
-	if accessTokenString == "" {
-		return "", ErrNoTokenFound
+	if len(token) > 7 && strings.ToUpper(token[0:6]) == "BEARER" {
+		return token[7:], nil
 	}
-
-	log.Printf("appID in context (FindToken method): %v", ctx.Value(AppIDCtxKey))
-
-	if err := j.VerifyToken(ctx, appID, accessTokenString); err != nil {
-		return "", err
-	}
-
-	return accessTokenString, nil
+	return "", ErrBearerTokenNotFound
 }
 
-// FindRefreshToken attempts to retrieve the refresh token from the request (header or cookie).
-// Returns the refresh token string or an error if not found in either location.
-func FindRefreshToken(r *http.Request) (string, error) {
-	refreshToken, err := GetRefreshTokenFromHeader(r)
+// ExtractTokenFromCookies retrieves the JWT token from a cookie named "access_token".
+func (m *manager) ExtractTokenFromCookies(r *http.Request) (string, error) {
+	cookie, err := r.Cookie(AccessTokenKey)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to get cookie: %w", err)
 	}
 
-	if refreshToken == "" {
-		refreshToken, err = GetRefreshTokenFromCookie(r)
-		if err != nil {
-			return "", err
-		}
-	}
-
-	return refreshToken, nil
+	return cookie.Value, nil
 }
 
-// VerifyToken checks the validity of the provided access token.
-// It parses the token, verifies the signature, and ensures it is not expired.
-func (j *TokenService) VerifyToken(ctx context.Context, appID, accessTokenString string) error {
-	log.Printf("appID in context (Verify Token method): %v", ctx.Value(AppIDCtxKey))
-
-	token, err := j.ParseToken(ctx, appID, accessTokenString)
+// ExtractRefreshTokenFromCookies retrieves the refresh token from a cookie named "refresh_token".
+func (m *manager) ExtractRefreshTokenFromCookies(r *http.Request) (string, error) {
+	cookie, err := r.Cookie(RefreshTokenKey)
 	if err != nil {
-		return Errors(err)
+		return "", fmt.Errorf("failed to get cookie: %w", err)
 	}
 
-	if !token.Valid {
-		return ErrInvalidToken
-	}
+	return cookie.Value, nil
+}
 
-	return nil
+// FromContext returns token from context
+func (m *manager) FromContext(ctx context.Context) (string, bool) {
+	token, ok := ctx.Value(TokenCtxKey).(string)
+	return token, ok
+}
+
+// ToContext adds the given token to the context.
+func (m *manager) ToContext(ctx context.Context, value string) context.Context {
+	return context.WithValue(ctx, TokenCtxKey, value)
 }
 
 // ParseToken parses the given access token string and validates it using the public keys (JWKS).
 // It checks the "kid" (key ID) in the token header to select the appropriate public key.
-func (j *TokenService) ParseToken(ctx context.Context, appID, accessTokenString string) (*jwt.Token, error) {
-	return jwt.Parse(accessTokenString, func(token *jwt.Token) (interface{}, error) {
-		kidRaw, ok := token.Header[Kid]
+func (m *manager) ParseToken(appID, token string) (*jwt.Token, error) {
+	return jwt.Parse(token, func(token *jwt.Token) (interface{}, error) {
+		kidRaw, ok := token.Header[KidTokenHeader]
 		if !ok {
 			return nil, ErrKidNotFoundInTokenHeader
 		}
@@ -212,9 +190,7 @@ func (j *TokenService) ParseToken(ctx context.Context, appID, accessTokenString 
 			return nil, ErrKidIsNotAString
 		}
 
-		log.Printf("appID in context (jwt.Parse method): %v", ctx.Value(AppIDCtxKey))
-
-		jwk, err := j.getJWK(ctx, kid, appID)
+		jwk, err := m.getJWK(appID, kid)
 		if err != nil {
 			return nil, err
 		}
@@ -238,135 +214,36 @@ func (j *TokenService) ParseToken(ctx context.Context, appID, accessTokenString 
 
 		// Verify that the token uses RSA signing method
 		if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
-			return nil, fmt.Errorf("%w: %v", ErrUnexpectedSigningMethod, token.Header["alg"])
+			return nil, fmt.Errorf("%w: %v", ErrUnexpectedSigningMethod, token.Header[AlgTokenHeader])
 		}
 
 		return pubKey, nil
 	})
 }
 
-// getJWK retrieves a JWK by its key ID (kid) from the cache or fetches new JWKS if needed
-// Returns the matching JWK or an error if not found
-func (j *TokenService) getJWK(ctx context.Context, kid, appID string) (*JWK, error) {
-	const op = "jwtauth.TokenService.getJWK"
-
-	log.Printf("appID in context (getJWK method): %v", ctx.Value(AppIDCtxKey))
-
-	// Construct cache key using appID
-	cacheKey := fmt.Sprintf("%s:%s", JWKS, appID)
-
-	// Try to get JWKS from cache first
-	j.mu.RLock()
-	cacheValue, found := j.jwksCache.Get(cacheKey)
-	j.mu.RUnlock()
-
-	var jwks []JWK
-	if found {
-		if cachedJWKS, ok := cacheValue.([]JWK); ok {
-			jwks = cachedJWKS
-		}
+// ExtractUserID retrieves the user ID from the token claims.
+func (m *manager) ExtractUserID(ctx context.Context, appID string) (string, error) {
+	claims, err := m.getClaimsFromToken(ctx, appID)
+	if err != nil {
+		return "", err
 	}
 
-	// If not in cache or cache miss, fetch new JWKS from URL
-	if len(jwks) == 0 {
-		if err := j.updateJWKS(ctx, appID); err != nil {
-			return nil, fmt.Errorf("%s: failed to update JWKS: %w", op, err)
-		}
-
-		j.mu.RLock()
-		cachedValue, found := j.jwksCache.Get(cacheKey)
-		j.mu.RUnlock()
-
-		if !found {
-			return nil, fmt.Errorf("%s: JWKS not found after update", op)
-		}
-
-		var ok bool
-		jwks, ok = cachedValue.([]JWK)
-		if !ok {
-			return nil, fmt.Errorf("%s: invalid cache value type", op)
-		}
+	userID, ok := claims[UserIDKey].(string)
+	if !ok {
+		return "", ErrUserIDNotFoundInToken
 	}
 
-	// Find the JWK with the matching key ID
-	for _, jwk := range jwks {
-		if jwk.Kid == kid {
-			return &jwk, nil
-		}
-	}
-
-	return nil, fmt.Errorf("%s: JWK with kid %s not found", op, kid)
+	return userID, nil
 }
 
-// getAppID returns the appID from the TokenService struct or context.
-// If the appID is not found returns an error
-func (j *TokenService) getAppID(ctx context.Context) (string, error) {
-	if appID := j.appID; appID != "" {
-		return appID, nil
+// getClaimsFromToken returns the claims of the provided access token.
+func (m *manager) getClaimsFromToken(ctx context.Context, appID string) (map[string]interface{}, error) {
+	tokenString, ok := m.FromContext(ctx)
+	if !ok {
+		return nil, ErrTokenNotFoundInContext
 	}
 
-	// We try to get appID from context in case we are in the SSO Gateway
-	if appIDFromCtx, ok := ctx.Value(AppIDCtxKey).(string); ok {
-		return appIDFromCtx, nil
-	}
-	return "", ErrAppIDNotFoundInCtx
-}
-
-// updateJWKS fetches fresh JWKS from the configured URL and updates the cache
-// Returns an error if the fetch or update fails
-func (j *TokenService) updateJWKS(ctx context.Context, appID string) error {
-	const op = "jwtauth.TokenService.updateJWKS"
-
-	if j.jwksEndpoint == "" {
-		return fmt.Errorf("%s: JWKS endpoint not configured for TokenService", op)
-	}
-
-	// TODO: use NewRequest
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, j.jwksEndpoint, nil)
-	if err != nil {
-		return fmt.Errorf("%s: failed to create request: %w", op, err)
-	}
-
-	if appID == "" {
-		return fmt.Errorf("%s: appID is empty", op)
-	}
-
-	req.Header.Set(AppIDHeader, appID)
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("%s: failed to fetch JWKS: %w", op, err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("%s: failed to fetch JWKS: status code %d", op, resp.StatusCode)
-	}
-
-	var jwksResponse JWKSResponse
-	if err = json.NewDecoder(resp.Body).Decode(&jwksResponse); err != nil {
-		return fmt.Errorf("%s: failed to decode JWKS response: %w", op, err)
-	}
-
-	// Construct cache key using appID
-	cacheKey := fmt.Sprintf("%s:%s", JWKS, appID)
-
-	j.mu.RLock()
-	j.jwksCache.Set(cacheKey, jwksResponse.Keys, cache.DefaultExpiration)
-	j.mu.RUnlock()
-
-	return nil
-}
-
-// GetClaimsFromToken extracts the claims from the token in the current context
-// Returns the claims as a map or an error if the token is invalid or missing
-func (j *TokenService) GetClaimsFromToken(ctx context.Context, appID string) (map[string]interface{}, error) {
-	accessToken, err := GetTokenFromContext(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	token, err := j.ParseToken(ctx, appID, accessToken)
+	token, err := m.ParseToken(appID, tokenString)
 	if err != nil {
 		return nil, Errors(err)
 	}
@@ -379,18 +256,30 @@ func (j *TokenService) GetClaimsFromToken(ctx context.Context, appID string) (ma
 	return claims, nil
 }
 
-// GetUserID extracts the user ID from the token claims in the current context
-// Returns the user ID as a string or an error if not found
-func (j *TokenService) GetUserID(ctx context.Context, appID string) (string, error) {
-	claims, err := j.GetClaimsFromToken(ctx, appID)
+// verifyToken checks the validity of the provided access token.
+// It parses the token, verifies the signature, and ensures it is not expired.
+func (m *manager) verifyToken(appID, token string) error {
+	parsedToken, err := m.ParseToken(appID, token)
 	if err != nil {
-		return "", err
+		return Errors(err)
 	}
 
-	userID, ok := claims[UserID]
-	if !ok {
-		return "", ErrUserIDNotFoundInCtx
+	if !parsedToken.Valid {
+		return ErrInvalidToken
 	}
 
-	return userID.(string), nil
+	return nil
+}
+
+func Errors(err error) error {
+	switch {
+	case errors.Is(err, jwt.ErrTokenExpired):
+		return jwt.ErrTokenExpired
+	case errors.Is(err, jwt.ErrSignatureInvalid):
+		return jwt.ErrSignatureInvalid
+	case errors.Is(err, jwt.ErrTokenNotValidYet):
+		return jwt.ErrTokenNotValidYet
+	default:
+		return ErrUnauthorized
+	}
 }
