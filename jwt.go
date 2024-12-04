@@ -16,6 +16,9 @@ import (
 )
 
 type manager struct {
+	// URL to fetch JWKS from SSO service
+	jwksURL string
+
 	// Cache to store JWKS
 	jwksCache *cache.Cache
 
@@ -25,14 +28,11 @@ type manager struct {
 	// App ID for verification tokens
 	// This is optional field is using in a services, authenticated by SSO
 	appID string
-
-	// URL to fetch JWKS from SSO service
-	// This is optional field is using in a services, authenticated by SSO
-	jwksURL string
 }
 
-func NewManager(opts ...Option) Manager {
+func NewManager(jwksURL string, opts ...Option) Manager {
 	m := &manager{
+		jwksURL:   jwksURL,
 		jwksCache: cache.New(),
 	}
 
@@ -48,12 +48,6 @@ type Option func(m *manager)
 func WithAppID(appID string) Option {
 	return func(m *manager) {
 		m.appID = appID
-	}
-}
-
-func WithJWKSURL(jwksURL string) Option {
-	return func(m *manager) {
-		m.jwksURL = jwksURL
 	}
 }
 
