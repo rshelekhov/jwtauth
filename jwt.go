@@ -12,6 +12,7 @@ import (
 	"math/big"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/rshelekhov/jwtauth/lib/cache"
 )
@@ -36,17 +37,20 @@ type TokenService struct {
 // JWK represents a JSON Web Key structure containing the necessary fields
 // for RSA public key construction
 type JWK struct {
-	Alg string `json:"alg"` // Algorithm used for the key
-	Kty string `json:"kty"` // Key type (e.g., "RSA")
-	Use string `json:"use"` // Key usage (e.g., "sig" for signature)
-	Kid string `json:"kid"` // Key identifier
-	N   string `json:"n"`   // RSA public key modulus
-	E   string `json:"e"`   // RSA public key exponent
+	Alg string `json:"alg,omitempty"` // The specific cryptographic algorithm used with the key.
+	Kty string `json:"kty,omitempty"` // The family of cryptographic algorithms used with the key.
+	Use string `json:"use,omitempty"` // How the key was meant to be used; sig represents the signature
+	Kid string `json:"kid,omitempty"` // The unique identifier for the key.
+
+	// For RSA keys
+	N string `json:"n,omitempty"` // The modulus for the RSA public key
+	E string `json:"e,omitempty"` // The exponent for the RSA public key.
 }
 
 // JWKSResponse represents the structure of the JWKS endpoint response
 type JWKSResponse struct {
-	Keys []JWK `json:"keys"`
+	Keys []JWK         `json:"keys"`
+	TTL  time.Duration `json:"ttl"`
 }
 
 // New creates a new instance of TokenService with the specified options.
@@ -317,6 +321,7 @@ func (j *TokenService) updateJWKS(ctx context.Context, appID string) error {
 		return fmt.Errorf("%s: JWKS endpoint not configured for TokenService", op)
 	}
 
+	// TODO: use NewRequest
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, j.jwksEndpoint, nil)
 	if err != nil {
 		return fmt.Errorf("%s: failed to create request: %w", op, err)
