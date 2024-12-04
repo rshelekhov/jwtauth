@@ -29,22 +29,11 @@ type manager struct {
 	// URL to fetch JWKS from SSO service
 	// This is optional field is using in a services, authenticated by SSO
 	jwksURL string
-
-	// Domain for SSO service
-	// This is optional field is using in the SSO service
-	ssoDomain string
-
-	// Function to generate JWKS URL (optional)
-	// This is optional field is using in the SSO service
-	generateJWKSURL func(ssoDomain, appID string) string
 }
 
 func NewManager(opts ...Option) Manager {
 	m := &manager{
 		jwksCache: cache.New(),
-		generateJWKSURL: func(ssoDomain, appID string) string {
-			return fmt.Sprintf("https://%s/%s/.well-known/jwks.json", ssoDomain, appID)
-		},
 	}
 
 	for _, opt := range opts {
@@ -65,18 +54,6 @@ func WithAppID(appID string) Option {
 func WithJWKSURL(jwksURL string) Option {
 	return func(m *manager) {
 		m.jwksURL = jwksURL
-	}
-}
-
-func WithSSODomain(ssoDomain string) Option {
-	return func(m *manager) {
-		m.ssoDomain = ssoDomain
-	}
-}
-
-func WithJWKSURLGenerator(generator func(ssoDomain, appID string) string) Option {
-	return func(m *manager) {
-		m.generateJWKSURL = generator
 	}
 }
 
