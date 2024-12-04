@@ -71,15 +71,20 @@ func (m *manager) getJWK(appID, kid string) (*JWK, error) {
 func (m *manager) updateJWKS(appID string) error {
 	const op = "jwt.manager.updateJWKS"
 
-	var jwksURL string
-
 	if m.jwksURL == "" {
-		jwksURL = m.generateJWKSURL(m.ssoDomain, appID)
-	} else {
-		jwksURL = m.jwksURL
+		return fmt.Errorf("%s: jwksURL is not configured for JWT Manager", op)
 	}
 
-	resp, err := http.Get(jwksURL)
+	client := &http.Client{}
+
+	req, err := http.NewRequest(http.MethodGet, m.jwksURL, nil)
+	if err != nil {
+		return fmt.Errorf("%s: failed to create HTTP request: %w", op, err)
+	}
+
+	req.Header.Add(AppIDHeader, appID)
+
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("%s: failed to fetch JWKS: %w", op, err)
 	}
