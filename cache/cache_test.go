@@ -1,7 +1,7 @@
 package cache_test
 
 import (
-	"github.com/rshelekhov/jwtauth/lib/cache"
+	"github.com/rshelekhov/jwtauth/cache"
 	"testing"
 	"time"
 )
