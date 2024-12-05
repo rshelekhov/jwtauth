@@ -6,12 +6,14 @@ A lightweight, secure JWT authentication library for Go applications with JSON W
 
 - JWKS (JSON Web Key Set) support with automatic key rotation
 - In-memory cache for JWKS to minimize HTTP requests
-- Thread-safe operations
-- Multiple token extraction strategies (headers, cookies, query parameters)
-- Middleware for HTTP servers
-- Support for both web and mobile applications
-- Refresh token handling
-- gRPC metadata support
+- Thread-safe JWKS operations
+- Multiple token extraction strategies:
+- - From gRPC metadata
+- - From HTTP headers (Authorization Bearer token)
+- - From HTTP cookies
+- Middleware support for both gRPC and HTTP servers
+- Context-based token management
+- Flexible token handling for web and mobile applications
 - Configurable token expiration
 - Easy integration with existing applications
 - No external authentication service dependencies
@@ -24,7 +26,7 @@ go get github.com/rshelekhov/jwtauth
 
 ## Usage
 
-### Basic Setup
+### Initializing the JWT Manager
 
 ``` go
 package main
@@ -35,67 +37,79 @@ import (
 )
 
 func main() {
-    // Initialize the token service without JWKS Endpoint
-    tokenService := jwtauth.New()
-    
-    // Initialize the token service with your JWKS Endpoint
-    tokenService := jwtauth.New(
-        jwtauth.WithJWKSEndpoint("https://your-auth-server/.well-known/jwks.json",
+    // For SSO service or authentication server
+    jwtManager := jwtauth.NewManager(
+        "https://your-auth-server/.well-known/jwks.json"
     )
 
-    // Use the built-in middleware
-    http.Handle("/protected", 
-        jwtauth.Verifier(tokenService)(
-            jwtauth.Authenticator()(
-                yourHandler(),
-            ),
-        ),
+    // For client application with an optional app ID
+    jwtManager := jwtauth.NewManager(
+        "https://your-auth-server/.well-known/jwks.json", 
+        jwtauth.WithAppID("your-app-id")
     )
 }
+```
+
+### Middleware for Different Protocols
+
+#### gRPC Middleware
+
+``` go
+// Use as a gRPC unary server interceptor
+grpcServer := grpc.NewServer(
+    grpc.UnaryInterceptor(jwtManager.UnaryServerInterceptor()),
+)
+```
+
+#### HTTP Middleware
+
+``` go
+// Wrap your HTTP handler with JWT verification
+protectedHandler := jwtManager.HTTPMiddleware(yourHandler)
 ```
 
 ### Web Application Integration
 
 ``` go
-func handleLogin(w http.ResponseWriter, r *http.Request) {
+func (h *handler) handleLogin(w http.ResponseWriter, r *http.Request) {
     // After successful authentication, send tokens to web client
-    tokenData := &jwtauth.TokenData{
-        AccessToken:  "your-access-token",
-        RefreshToken: "your-refresh-token",
-        Domain:      "your-domain",
+    tokenResp := &jwtauth.TokenResponse{
+        AccessToken:  "generated-access-token",
+        RefreshToken: "generated-refresh-token",
+        Domain:      "yourdomain.com",
         Path:        "/",
         ExpiresAt:   time.Now().Add(24 * time.Hour),
         HttpOnly:    true,
     }
     
-    jwtauth.SendTokensToWeb(w, tokenData, http.StatusOK)
+    h.jwtManager.SendTokensToWeb(w, tokenResp, http.StatusOK)
 }
 ```
 
 ### Mobile Application Integration
 
 ``` go
-func handleMobileLogin(w http.ResponseWriter, r *http.Request) {
+func (h *handler) handleMobileLogin(w http.ResponseWriter, r *http.Request) {
     // After successful authentication, send tokens to mobile client
-    tokenData := &jwtauth.TokenData{
-        AccessToken:  "your-access-token",
-        RefreshToken: "your-refresh-token",
+    tokenResp := &jwtauth.TokenResponse{
+        AccessToken:  "generated-access-token",
+        RefreshToken: "generated-refresh-token",
         AdditionalFields: map[string]string{
             "user_id": "123",
             "role": "user",
         },
     }
     
-    jwtauth.SendTokensToMobileApp(w, tokenData, http.StatusOK)
+    h.jwtManager.SendTokensToMobileApp(w, tokenResp, http.StatusOK)
 }
 ```
 
-### Token Data Structure
+### Token Response Structure
 
-The library provides a flexible TokenData structure that can be used to handle various authentication scenarios:
+The library provides a flexible TokenResponse structure that can be used to handle various authentication scenarios:
 
 ``` go
-type TokenData struct {
+type TokenResponse struct {
     AccessToken      string            // JWT access token
     RefreshToken     string            // Refresh token for token renewal
     Domain           string            // Cookie domain (optional)
@@ -106,46 +120,14 @@ type TokenData struct {
 }
 ```
 
-### Working with gRPC
-
-``` go
-func YourGrpcClientMethod(ctx context.Context) {
-    // Add access token to gRPC metadata
-    ctx, err := jwtauth.AddAccessTokenToMetadata(ctx)
-    if err != nil {
-        // Handle error
-    }
-    
-    // Make your gRPC call with the updated context
-    response, err := grpcClient.Method(ctx, request)
-}
-```
-
-## Configuration
-
-### Token Service Options
-
-The token service can be initialized with various options:
+### Token Verification and User Extraction
 
 ``` go 
-tokenService := jwtauth.New(
-    "https://your-auth-server/.well-known/jwks.json",
-)
-```
+// Extract user ID from token
+userID, err := jwtManager.ExtractUserID(ctx, appID)
 
-### Cookie Settings
-
-You can customize cookie settings when sending tokens:
-
-``` go
-jwtauth.SetTokenCookie(w, 
-    "access_token",
-    tokenValue,
-    "your-domain",
-    "/",
-    time.Now().Add(24 * time.Hour),
-    true,
-)
+// Verify token manually
+err := jwtManager.verifyToken(appID, tokenString)
 ```
 
 ## Error Handling
@@ -160,15 +142,16 @@ case jwtauth.ErrInvalidToken:
     // Handle invalid token
 case jwt.ErrTokenExpired:
     // Handle expired token
+default:
+    // Handle general authorization failure
 }
 ```
 
 ## Security Considerations
 
-- Always use HTTPS for production environments
+- Always use HTTPS for token transmission
 - Set appropriate token expiration times
 - Use HttpOnly cookies for web applications
-- Implement refresh token rotation
 - Keep your JWKS endpoint secure
 - Regularly rotate your signing keys
 
@@ -178,11 +161,7 @@ MIT License - see the LICENSE file for details
 
 ## Contributing
 
-1. Fork the repository
-2. Create a feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request
+Contributions are welcome! Please submit pull requests or open issues on the GitHub repository.
 
 ## Support
 

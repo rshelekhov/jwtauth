@@ -1,45 +1,123 @@
 package jwtauth
 
 import (
+	"context"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
 	"net/http"
 )
 
-// Verifier http middleware handler verify a JWT string from a http request.
+// UnaryServerInterceptor is an interceptor that verifies a JWT token from gRPC metadata.
 //
-// Verifier will search for a JWT token in a http reqiest in order:
-// 1. 'Authorization: BEARER T' request header
-// 2. Cookie 'access_token' value
-// 3. Query 'access_token' value
-//
-// The Verifier always calls the next http handler in sequence, which can either
-// be the generic `jwtauth.Authenticator` middleware or your own custom handler
-// which checks the request context jwt token and error to prepare a custom
-// http response.
-func Verifier(j *TokenService) func(http.Handler) http.Handler {
-	return j.Verify(GetTokenFromHeader, GetTokenFromCookie, GetTokenFromQuery)
-}
-
-// Authenticator is a middleware function that ensures the request contains a valid token.
-// If no token is found, or it is invalid, it returns an Unauthorized response (HTTP 401).
-// Otherwise, the request is passed along to the next handler in the chain.
-func Authenticator() func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		hfn := func(w http.ResponseWriter, r *http.Request) {
-			token, err := GetTokenFromContext(r.Context())
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusUnauthorized)
-				return
-			}
-
-			if len(token) == 0 {
-				http.Error(w, ErrNoTokenFound.Error(), http.StatusUnauthorized)
-				return
-			}
-
-			// Token is authenticated, pass it through
-			next.ServeHTTP(w, r)
+// UnaryServerInterceptor will extract a JWT token from gRPC metadata using the AccessTokenHeader key.
+func (m *manager) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
+	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+		appID, err := m.getAppIDFromGRPCMetadata(ctx)
+		if err != nil {
+			return nil, err
 		}
 
-		return http.HandlerFunc(hfn)
+		token, err := m.ExtractTokenFromGRPC(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		if token == "" {
+			return "", ErrTokenNotFound
+		}
+
+		if err := m.verifyToken(appID, token); err != nil {
+			return "", err
+		}
+
+		ctx = context.WithValue(ctx, AccessTokenHeader, token)
+
+		return handler(ctx, req)
 	}
+}
+
+// HTTPMiddleware is a HTTP middleware handler that verifies a JWT token from an HTTP request.
+//
+// HTTPMiddleware will search for a JWT token in a http request in order:
+// 1. 'Authorization: BEARER T' request header
+// 2. Cookie 'access_token' value
+//
+// The HTTPMiddleware always calls the next http handler in sequence.
+func (m *manager) HTTPMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		appID, err := m.getAppIDFromHTTPRequest(r)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusUnauthorized)
+			return
+		}
+
+		token, err := m.findAndVerifyToken(r, appID, m.ExtractTokenFromHTTP, m.ExtractTokenFromCookies)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusUnauthorized)
+			return
+		}
+
+		ctx := context.WithValue(r.Context(), AccessTokenHeader, token)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+// getAppIDFromGRPCMetadata returns the appID from the manager struct or from gRPC metadata
+func (m *manager) getAppIDFromGRPCMetadata(ctx context.Context) (string, error) {
+	if m.appID != "" {
+		return m.appID, nil
+	}
+
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return "", ErrNoGRPCMetadata
+	}
+
+	values := md.Get(AppIDHeader)
+	if len(values) == 0 {
+		return "", ErrAppIDHeaderNotFoundInGRPCMetadata
+	}
+
+	return values[0], nil
+}
+
+// getAppIDFromHTTPRequest returns the appID from the manager struct or from the http request
+func (m *manager) getAppIDFromHTTPRequest(r *http.Request) (string, error) {
+	if m.appID != "" {
+		return m.appID, nil
+	}
+
+	appID := r.Header.Get(AppIDHeader)
+	if appID == "" {
+		return "", ErrAppIDHeaderNotFoundInHTTPRequest
+	}
+
+	return appID, nil
+}
+
+// findAndVerifyToken searches for a JWT token using the provided search functions (header and cookie).
+// Returns the found token string or an error if no valid token is found.
+func (m *manager) findAndVerifyToken(
+	r *http.Request,
+	appID string,
+	findTokenFns ...func(r *http.Request) (string, error),
+) (string, error) {
+	var tokenString string
+
+	for _, fn := range findTokenFns {
+		tokenString, _ = fn(r)
+		if tokenString != "" {
+			break
+		}
+	}
+
+	if tokenString == "" {
+		return "", ErrTokenNotFound
+	}
+
+	if err := m.verifyToken(appID, tokenString); err != nil {
+		return "", err
+	}
+
+	return tokenString, nil
 }
