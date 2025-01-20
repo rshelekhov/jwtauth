@@ -52,8 +52,7 @@ func WithAppID(appID string) Option {
 }
 
 const (
-	AuthorizationHeader = "Authorization"
-	AccessTokenHeader   = "X-Access-Token"
+	AuthorizationHeader = "authorization"
 	AppIDHeader         = "X-App-ID"
 
 	AccessTokenKey  = "access_token"
@@ -71,12 +70,12 @@ var (
 	ErrTokenNotFound = errors.New("token not found")
 	ErrUnauthorized  = errors.New("unauthorized")
 
-	ErrNoGRPCMetadata                           = errors.New("no gRPC metadata")
-	ErrAccessTokenHeaderNotFoundInGRPCMetadata  = errors.New("access token header not found in gRPC metadata")
-	ErrAuthorizationHeaderNotFoundInHTTPRequest = errors.New("authorization header not found in HTTP request")
-	ErrBearerTokenNotFound                      = errors.New("bearer token not found")
-	ErrAppIDHeaderNotFoundInGRPCMetadata        = errors.New("app ID header not found in gRPC metadata")
-	ErrAppIDHeaderNotFoundInHTTPRequest         = errors.New("app ID header not found in HTTP request")
+	ErrNoGRPCMetadata                            = errors.New("no gRPC metadata")
+	ErrAuthorizationHeaderNotFoundInGRPCMetadata = errors.New("authorization header not found in gRPC metadata")
+	ErrAuthorizationHeaderNotFoundInHTTPRequest  = errors.New("authorization header not found in HTTP request")
+	ErrBearerTokenNotFound                       = errors.New("bearer token not found")
+	ErrAppIDHeaderNotFoundInGRPCMetadata         = errors.New("app ID header not found in gRPC metadata")
+	ErrAppIDHeaderNotFoundInHTTPRequest          = errors.New("app ID header not found in HTTP request")
 
 	ErrKidNotFoundInTokenHeader = errors.New("kid not found in token header")
 	ErrKidIsNotAString          = errors.New("kid is not a string")
@@ -95,9 +94,9 @@ func (m *manager) ExtractTokenFromGRPC(ctx context.Context) (string, error) {
 		return "", ErrNoGRPCMetadata
 	}
 
-	values := md.Get(AccessTokenHeader)
+	values := md.Get(AuthorizationHeader)
 	if len(values) == 0 {
-		return "", ErrAccessTokenHeaderNotFoundInGRPCMetadata
+		return "", ErrAuthorizationHeaderNotFoundInGRPCMetadata
 	}
 
 	return values[0], nil
