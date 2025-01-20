@@ -30,7 +30,7 @@ func (m *manager) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
 			return "", err
 		}
 
-		ctx = context.WithValue(ctx, AccessTokenHeader, token)
+		ctx = context.WithValue(ctx, AuthorizationHeader, token)
 
 		return handler(ctx, req)
 	}
@@ -57,7 +57,7 @@ func (m *manager) HTTPMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		ctx := context.WithValue(r.Context(), AccessTokenHeader, token)
+		ctx := context.WithValue(r.Context(), AuthorizationHeader, token)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
