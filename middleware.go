@@ -6,7 +6,6 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
-	"log/slog"
 	"net/http"
 )
 
@@ -15,38 +14,23 @@ import (
 // UnaryServerInterceptor will extract a JWT token from gRPC metadata using the authorization key.
 func (m *manager) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-		slog.Info("Starting auth interceptor",
-			"method", info.FullMethod)
-
 		appID, err := m.getAppIDFromGRPCMetadata(ctx)
 		if err != nil {
-			slog.Error("Failed to get appID",
-				"error", err)
 			return nil, status.Error(codes.Unauthenticated, err.Error())
 		}
-		slog.Info("Got appID", "appID", appID)
 
 		token, err := m.ExtractTokenFromGRPC(ctx)
 		if err != nil {
-			slog.Error("Failed to extract token",
-				"error", err)
 			return nil, status.Error(codes.Unauthenticated, err.Error())
 		}
-		slog.Info("Got token",
-			"tokenLength", len(token),
-			"tokenStart", token[:10])
 
 		if token == "" {
-			slog.Error("Empty token")
 			return "", status.Error(codes.Unauthenticated, ErrTokenNotFound.Error())
 		}
 
 		if err := m.verifyToken(appID, token); err != nil {
-			slog.Error("Token verification failed",
-				"error", err)
 			return "", status.Error(codes.Unauthenticated, err.Error())
 		}
-		slog.Info("Token verified successfully")
 
 		ctx = context.WithValue(ctx, AuthorizationHeader, token)
 

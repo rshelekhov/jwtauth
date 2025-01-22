@@ -9,7 +9,6 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/rshelekhov/jwtauth/cache"
 	"google.golang.org/grpc/metadata"
-	"log/slog"
 	"math/big"
 	"net/http"
 	"strings"
@@ -150,51 +149,32 @@ func (m *manager) ToContext(ctx context.Context, value string) context.Context {
 // ParseToken parses the given access token string and validates it using the public keys (JWKS).
 // It checks the "kid" (key ID) in the token header to select the appropriate public key.
 func (m *manager) ParseToken(appID, token string) (*jwt.Token, error) {
-	slog.Info("Starting token parsing",
-		"appID", appID,
-		"tokenLength", len(token))
-
 	return jwt.Parse(token, func(token *jwt.Token) (interface{}, error) {
 		kidRaw, ok := token.Header[KidTokenHeader]
 		if !ok {
-			slog.Error("Kid not found in token header")
 			return nil, ErrKidNotFoundInTokenHeader
 		}
-		slog.Info("Got kid from header", "kidRaw", kidRaw)
 
 		kid, ok := kidRaw.(string)
 		if !ok {
-			slog.Error("Kid is not a string")
 			return nil, ErrKidIsNotAString
 		}
-		slog.Info("Kid converted to string", "kid", kid)
 
 		jwk, err := m.getJWK(appID, kid)
 		if err != nil {
-			slog.Error("Failed to get JWK",
-				"error", err,
-				"appID", appID,
-				"kid", kid)
 			return nil, err
 		}
-		slog.Info("Got JWK successfully")
 
 		// Decode the base64 URL-encoded components of the RSA public key
 		n, err := base64.RawURLEncoding.DecodeString(jwk.N)
 		if err != nil {
-			slog.Error("Failed to decode N component",
-				"error", err)
 			return nil, err
 		}
-		slog.Info("Decoded N component successfully")
 
 		e, err := base64.RawURLEncoding.DecodeString(jwk.E)
 		if err != nil {
-			slog.Error("Failed to decode E component",
-				"error", err)
 			return nil, err
 		}
-		slog.Info("Decoded E component successfully")
 
 		// Construct the RSA public key from the decoded components
 		pubKey := &rsa.PublicKey{
@@ -204,11 +184,8 @@ func (m *manager) ParseToken(appID, token string) (*jwt.Token, error) {
 
 		// Verify that the token uses RSA signing method
 		if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
-			slog.Error("Unexpected signing method",
-				"method", token.Header[AlgTokenHeader])
 			return nil, fmt.Errorf("%w: %v", ErrUnexpectedSigningMethod, token.Header[AlgTokenHeader])
 		}
-		slog.Info("Signing method verified successfully")
 
 		return pubKey, nil
 	})
@@ -252,24 +229,14 @@ func (m *manager) getClaimsFromToken(ctx context.Context, appID string) (map[str
 // verifyToken checks the validity of the provided access token.
 // It parses the token, verifies the signature, and ensures it is not expired.
 func (m *manager) verifyToken(appID, token string) error {
-	slog.Info("Starting token verification",
-		"appID", appID,
-		"tokenLength", len(token))
-
 	parsedToken, err := m.ParseToken(appID, token)
 	if err != nil {
-		slog.Error("Failed to parse token",
-			"error", err)
 		return Errors(err)
 	}
-	slog.Info("Token parsed successfully")
 
 	if !parsedToken.Valid {
-		slog.Error("Token is invalid")
 		return ErrInvalidToken
 	}
-
-	slog.Info("Token is valid")
 
 	return nil
 }
@@ -283,6 +250,6 @@ func Errors(err error) error {
 	case errors.Is(err, jwt.ErrTokenNotValidYet):
 		return jwt.ErrTokenNotValidYet
 	default:
-		return ErrUnauthorized
+		return fmt.Errorf("%w: %v", ErrUnauthorized, err)
 	}
 }
