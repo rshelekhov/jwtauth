@@ -3,31 +3,33 @@ package jwtauth
 import (
 	"context"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 	"net/http"
 )
 
 // UnaryServerInterceptor is an interceptor that verifies a JWT token from gRPC metadata.
 //
-// UnaryServerInterceptor will extract a JWT token from gRPC metadata using the AccessTokenHeader key.
+// UnaryServerInterceptor will extract a JWT token from gRPC metadata using the authorization key.
 func (m *manager) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		appID, err := m.getAppIDFromGRPCMetadata(ctx)
 		if err != nil {
-			return nil, err
+			return nil, status.Error(codes.Unauthenticated, err.Error())
 		}
 
 		token, err := m.ExtractTokenFromGRPC(ctx)
 		if err != nil {
-			return nil, err
+			return nil, status.Error(codes.Unauthenticated, err.Error())
 		}
 
 		if token == "" {
-			return "", ErrTokenNotFound
+			return "", status.Error(codes.Unauthenticated, ErrTokenNotFound.Error())
 		}
 
 		if err := m.verifyToken(appID, token); err != nil {
-			return "", err
+			return "", status.Error(codes.Unauthenticated, err.Error())
 		}
 
 		ctx = context.WithValue(ctx, AuthorizationHeader, token)
