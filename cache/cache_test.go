@@ -1,9 +1,10 @@
 package cache_test
 
 import (
-	"github.com/rshelekhov/jwtauth/cache"
 	"testing"
 	"time"
+
+	"github.com/rshelekhov/jwtauth/cache"
 )
 
 func TestCache_SetAndGet(t *testing.T) {
