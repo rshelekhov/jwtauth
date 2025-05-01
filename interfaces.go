@@ -2,9 +2,10 @@ package jwtauth
 
 import (
 	"context"
+	"net/http"
+
 	"github.com/golang-jwt/jwt/v5"
 	"google.golang.org/grpc"
-	"net/http"
 )
 
 type (
@@ -21,7 +22,7 @@ type (
 	}
 
 	TokenParser interface {
-		ParseToken(appID, token string) (*jwt.Token, error)
+		ParseToken(ctx context.Context, appID, token string) (*jwt.Token, error)
 		ExtractUserID(ctx context.Context, appID string) (string, error)
 	}
 
