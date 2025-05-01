@@ -2,11 +2,12 @@ package jwtauth
 
 import (
 	"context"
+	"net/http"
+
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
-	"net/http"
 )
 
 // UnaryServerInterceptor is an interceptor that verifies a JWT token from gRPC metadata.
@@ -28,7 +29,7 @@ func (m *manager) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
 			return "", status.Error(codes.Unauthenticated, ErrTokenNotFound.Error())
 		}
 
-		if err := m.verifyToken(appID, token); err != nil {
+		if err := m.verifyToken(ctx, appID, token); err != nil {
 			return "", status.Error(codes.Unauthenticated, err.Error())
 		}
 
@@ -105,10 +106,12 @@ func (m *manager) findAndVerifyToken(
 	findTokenFns ...func(r *http.Request) (string, error),
 ) (string, error) {
 	var tokenString string
+	var err error
+	ctx := r.Context()
 
 	for _, fn := range findTokenFns {
-		tokenString, _ = fn(r)
-		if tokenString != "" {
+		tokenString, err = fn(r)
+		if err == nil && tokenString != "" {
 			break
 		}
 	}
@@ -117,7 +120,7 @@ func (m *manager) findAndVerifyToken(
 		return "", ErrTokenNotFound
 	}
 
-	if err := m.verifyToken(appID, tokenString); err != nil {
+	if err := m.verifyToken(ctx, appID, tokenString); err != nil {
 		return "", err
 	}
 
