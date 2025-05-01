@@ -16,37 +16,67 @@ A lightweight, secure JWT authentication library for Go applications with JSON W
 - Flexible token handling for web and mobile applications
 - Configurable token expiration
 - Easy integration with existing applications
-- No external authentication service dependencies
+- Support for both local and remote JWKS providers
 
 ## Installation
 
-``` bash
+```bash
 go get github.com/rshelekhov/jwtauth
 ```
 
 ## Usage
 
-### Initializing the JWT Manager
+### 1. Initializing the JWT Manager in the auth service
 
-``` go
+```go
 package main
 
 import (
-    "github.com/rshelekhov/jwtauth"
     "net/http"
+
+    "github.com/rshelekhov/jwtauth"
+    "github.com/your-org/your-project/auth"
+    "github.com/your-org/your-project/adapter"
 )
 
 func main() {
-    // For SSO service or authentication server
-    jwtManager := jwtauth.NewManager(
-        "https://your-auth-server/.well-known/jwks.json"
-    )
+    // Initialize your auth usecase
+    authUsecase := auth.NewUsecase(...)
 
-    // For client application with an optional app ID
-    jwtManager := jwtauth.NewManager(
-        "https://your-auth-server/.well-known/jwks.json", 
-        jwtauth.WithAppID("your-app-id")
-    )
+    // Create JWKS adapter for local access
+    jwksAdapter := adapter.NewJWKSAdapter(authUsecase)
+
+    // Initialize local JWKS provider
+    jwksProvider := jwtauth.NewLocalJWKSProvider(jwksAdapter)
+
+    // Initialize JWT manager
+    jwtManager, err := jwtauth.NewManager(jwksProvider, "your-app-id")
+    if err != nil {
+        log.Fatalf("failed to initialize JWT manager: %v", err)
+    }
+}
+```
+
+### 2. Initializing the JWT Manager in the other services
+
+```go
+package main
+
+import (
+    "net/http"
+
+    "github.com/rshelekhov/jwtauth"
+)
+
+func main() {
+    // Initialize remote JWKS provider
+    remoteProvider := jwtauth.NewRemoteJWKSProvider("https://your-auth-server/.well-known/jwks.json")
+
+    // Initialize JWT manager
+    jwtManager, err := jwtauth.NewManager(remoteProvider, "your-app-id")
+    if err != nil {
+        log.Fatalf("failed to initialize JWT manager: %v", err)
+    }
 }
 ```
 
@@ -54,7 +84,7 @@ func main() {
 
 #### gRPC Middleware
 
-``` go
+```go
 // Use as a gRPC unary server interceptor
 grpcServer := grpc.NewServer(
     grpc.UnaryInterceptor(jwtManager.UnaryServerInterceptor()),
@@ -63,14 +93,14 @@ grpcServer := grpc.NewServer(
 
 #### HTTP Middleware
 
-``` go
+```go
 // Wrap your HTTP handler with JWT verification
 protectedHandler := jwtManager.HTTPMiddleware(yourHandler)
 ```
 
 ### Web Application Integration
 
-``` go
+```go
 func (h *handler) handleLogin(w http.ResponseWriter, r *http.Request) {
     // After successful authentication, send tokens to web client
     tokenResp := &jwtauth.TokenResponse{
@@ -81,14 +111,14 @@ func (h *handler) handleLogin(w http.ResponseWriter, r *http.Request) {
         ExpiresAt:   time.Now().Add(24 * time.Hour),
         HttpOnly:    true,
     }
-    
+
     h.jwtManager.SendTokensToWeb(w, tokenResp, http.StatusOK)
 }
 ```
 
 ### Mobile Application Integration
 
-``` go
+```go
 func (h *handler) handleMobileLogin(w http.ResponseWriter, r *http.Request) {
     // After successful authentication, send tokens to mobile client
     tokenResp := &jwtauth.TokenResponse{
@@ -99,7 +129,7 @@ func (h *handler) handleMobileLogin(w http.ResponseWriter, r *http.Request) {
             "role": "user",
         },
     }
-    
+
     h.jwtManager.SendTokensToMobileApp(w, tokenResp, http.StatusOK)
 }
 ```
@@ -108,7 +138,7 @@ func (h *handler) handleMobileLogin(w http.ResponseWriter, r *http.Request) {
 
 The library provides a flexible TokenResponse structure that can be used to handle various authentication scenarios:
 
-``` go
+```go
 type TokenResponse struct {
     AccessToken      string            // JWT access token
     RefreshToken     string            // Refresh token for token renewal
@@ -122,19 +152,19 @@ type TokenResponse struct {
 
 ### Token Verification and User Extraction
 
-``` go 
+```go
 // Extract user ID from token
 userID, err := jwtManager.ExtractUserID(ctx, appID)
 
 // Verify token manually
-err := jwtManager.verifyToken(appID, tokenString)
+err := jwtManager.verifyToken(ctx, appID, tokenString)
 ```
 
 ## Error Handling
 
 The library provides predefined errors for common scenarios:
 
-``` go
+```go
 switch err {
 case jwtauth.ErrNoTokenFound:
     // Handle missing token

@@ -34,6 +34,7 @@ func (m *manager) SendTokensToWeb(w http.ResponseWriter, resp *TokenResponse, ht
 	}
 
 	if err := json.NewEncoder(w).Encode(responseBody); err != nil {
+		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
 		return
 	}
 }
@@ -57,6 +58,7 @@ func (m *manager) SendTokensToMobileApp(w http.ResponseWriter, resp *TokenRespon
 	}
 
 	if err := json.NewEncoder(w).Encode(responseBody); err != nil {
+		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
 		return
 	}
 }
