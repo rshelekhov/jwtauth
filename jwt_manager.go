@@ -6,18 +6,19 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"github.com/golang-jwt/jwt/v5"
-	"github.com/rshelekhov/jwtauth/cache"
-	"google.golang.org/grpc/metadata"
 	"math/big"
 	"net/http"
 	"strings"
 	"sync"
+
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/rshelekhov/jwtauth/cache"
+	"google.golang.org/grpc/metadata"
 )
 
 type manager struct {
 	// URL to fetch JWKS from SSO service
-	jwksURL string
+	jwksProvider JWKSProvider
 
 	// Cache to store JWKS
 	jwksCache *cache.Cache
@@ -26,29 +27,21 @@ type manager struct {
 	mu sync.RWMutex
 
 	// App ID for verification tokens
-	// This is optional field is using in a services, authenticated by SSO
 	appID string
 }
 
-func NewManager(jwksURL string, opts ...Option) Manager {
+func NewManager(jwksProvider JWKSProvider, appID string) (Manager, error) {
+	if appID == "" {
+		return nil, fmt.Errorf("appID is required")
+	}
+
 	m := &manager{
-		jwksURL:   jwksURL,
-		jwksCache: cache.New(),
+		jwksProvider: jwksProvider,
+		jwksCache:    cache.New(),
+		appID:        appID,
 	}
 
-	for _, opt := range opts {
-		opt(m)
-	}
-
-	return m
-}
-
-type Option func(m *manager)
-
-func WithAppID(appID string) Option {
-	return func(m *manager) {
-		m.appID = appID
-	}
+	return m, nil
 }
 
 const (
@@ -63,27 +56,6 @@ const (
 
 	KidTokenHeader = "kid"
 	AlgTokenHeader = "alg"
-)
-
-var (
-	ErrInvalidToken  = errors.New("invalid token")
-	ErrTokenNotFound = errors.New("token not found")
-	ErrUnauthorized  = errors.New("unauthorized")
-
-	ErrNoGRPCMetadata                            = errors.New("no gRPC metadata")
-	ErrAuthorizationHeaderNotFoundInGRPCMetadata = errors.New("authorization header not found in gRPC metadata")
-	ErrAuthorizationHeaderNotFoundInHTTPRequest  = errors.New("authorization header not found in HTTP request")
-	ErrBearerTokenNotFound                       = errors.New("bearer token not found")
-	ErrAppIDHeaderNotFoundInGRPCMetadata         = errors.New("app ID header not found in gRPC metadata")
-	ErrAppIDHeaderNotFoundInHTTPRequest          = errors.New("app ID header not found in HTTP request")
-
-	ErrKidNotFoundInTokenHeader = errors.New("kid not found in token header")
-	ErrKidIsNotAString          = errors.New("kid is not a string")
-	ErrUnexpectedSigningMethod  = errors.New("unexpected signing method")
-
-	ErrUserIDNotFoundInToken    = errors.New("user ID not found in token")
-	ErrTokenNotFoundInContext   = errors.New("token not found in context")
-	ErrFailedToParseTokenClaims = errors.New("failed to parse token claims")
 )
 
 // ExtractTokenFromGRPC retrieves the JWT token from gRPC metadata.
@@ -148,7 +120,7 @@ func (m *manager) ToContext(ctx context.Context, value string) context.Context {
 
 // ParseToken parses the given access token string and validates it using the public keys (JWKS).
 // It checks the "kid" (key ID) in the token header to select the appropriate public key.
-func (m *manager) ParseToken(appID, token string) (*jwt.Token, error) {
+func (m *manager) ParseToken(ctx context.Context, appID, token string) (*jwt.Token, error) {
 	return jwt.Parse(token, func(token *jwt.Token) (interface{}, error) {
 		kidRaw, ok := token.Header[KidTokenHeader]
 		if !ok {
@@ -160,7 +132,7 @@ func (m *manager) ParseToken(appID, token string) (*jwt.Token, error) {
 			return nil, ErrKidIsNotAString
 		}
 
-		jwk, err := m.getJWK(appID, kid)
+		jwk, err := m.getJWK(ctx, appID, kid)
 		if err != nil {
 			return nil, err
 		}
@@ -213,7 +185,7 @@ func (m *manager) getClaimsFromToken(ctx context.Context, appID string) (map[str
 		return nil, ErrTokenNotFoundInContext
 	}
 
-	token, err := m.ParseToken(appID, tokenString)
+	token, err := m.ParseToken(ctx, appID, tokenString)
 	if err != nil {
 		return nil, Errors(err)
 	}
@@ -228,8 +200,8 @@ func (m *manager) getClaimsFromToken(ctx context.Context, appID string) (map[str
 
 // verifyToken checks the validity of the provided access token.
 // It parses the token, verifies the signature, and ensures it is not expired.
-func (m *manager) verifyToken(appID, token string) error {
-	parsedToken, err := m.ParseToken(appID, token)
+func (m *manager) verifyToken(ctx context.Context, appID, token string) error {
+	parsedToken, err := m.ParseToken(ctx, appID, token)
 	if err != nil {
 		return Errors(err)
 	}
