@@ -35,12 +35,4 @@ type (
 		UnaryServerInterceptor() grpc.UnaryServerInterceptor
 		HTTPMiddleware(next http.Handler) http.Handler
 	}
-
-	Manager interface {
-		Extractor
-		ContextManager
-		TokenParser
-		TokenSender
-		Middleware
-	}
 )
