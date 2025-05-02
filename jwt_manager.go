@@ -30,18 +30,25 @@ type Manager struct {
 	appID string
 }
 
-func NewManager(jwksProvider JWKSProvider, appID string) (*Manager, error) {
-	if appID == "" {
-		return nil, fmt.Errorf("appID is required")
-	}
-
+func NewManager(jwksProvider JWKSProvider, opts ...Option) (*Manager, error) {
 	m := &Manager{
 		jwksProvider: jwksProvider,
 		jwksCache:    cache.New(),
-		appID:        appID,
+	}
+
+	for _, opt := range opts {
+		opt(m)
 	}
 
 	return m, nil
+}
+
+type Option func(*Manager)
+
+func WithAppID(appID string) Option {
+	return func(m *Manager) {
+		m.appID = appID
+	}
 }
 
 const (
