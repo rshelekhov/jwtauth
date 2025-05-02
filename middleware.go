@@ -13,7 +13,7 @@ import (
 // UnaryServerInterceptor is an interceptor that verifies a JWT token from gRPC metadata.
 //
 // UnaryServerInterceptor will extract a JWT token from gRPC metadata using the authorization key.
-func (m *manager) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
+func (m *Manager) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		appID, err := m.getAppIDFromGRPCMetadata(ctx)
 		if err != nil {
@@ -46,7 +46,7 @@ func (m *manager) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
 // 2. Cookie 'access_token' value
 //
 // The HTTPMiddleware always calls the next http handler in sequence.
-func (m *manager) HTTPMiddleware(next http.Handler) http.Handler {
+func (m *Manager) HTTPMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		appID, err := m.getAppIDFromHTTPRequest(r)
 		if err != nil {
@@ -66,7 +66,7 @@ func (m *manager) HTTPMiddleware(next http.Handler) http.Handler {
 }
 
 // getAppIDFromGRPCMetadata returns the appID from the manager struct or from gRPC metadata
-func (m *manager) getAppIDFromGRPCMetadata(ctx context.Context) (string, error) {
+func (m *Manager) getAppIDFromGRPCMetadata(ctx context.Context) (string, error) {
 	if m.appID != "" {
 		return m.appID, nil
 	}
@@ -85,7 +85,7 @@ func (m *manager) getAppIDFromGRPCMetadata(ctx context.Context) (string, error) 
 }
 
 // getAppIDFromHTTPRequest returns the appID from the manager struct or from the http request
-func (m *manager) getAppIDFromHTTPRequest(r *http.Request) (string, error) {
+func (m *Manager) getAppIDFromHTTPRequest(r *http.Request) (string, error) {
 	if m.appID != "" {
 		return m.appID, nil
 	}
@@ -100,7 +100,7 @@ func (m *manager) getAppIDFromHTTPRequest(r *http.Request) (string, error) {
 
 // findAndVerifyToken searches for a JWT token using the provided search functions (header and cookie).
 // Returns the found token string or an error if no valid token is found.
-func (m *manager) findAndVerifyToken(
+func (m *Manager) findAndVerifyToken(
 	r *http.Request,
 	appID string,
 	findTokenFns ...func(r *http.Request) (string, error),
