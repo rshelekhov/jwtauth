@@ -49,8 +49,8 @@ func main() {
     // Initialize local JWKS provider
     jwksProvider := jwtauth.NewLocalJWKSProvider(jwksAdapter)
 
-    // Initialize JWT manager
-    jwtManager, err := jwtauth.NewManager(jwksProvider, "your-app-id")
+    // Initialize JWT manager without appID
+    jwtManager, err := jwtauth.NewManager(jwksProvider)
     if err != nil {
         log.Fatalf("failed to initialize JWT manager: %v", err)
     }
@@ -72,8 +72,8 @@ func main() {
     // Initialize remote JWKS provider
     remoteProvider := jwtauth.NewRemoteJWKSProvider("https://your-auth-server/.well-known/jwks.json")
 
-    // Initialize JWT manager
-    jwtManager, err := jwtauth.NewManager(remoteProvider, "your-app-id")
+    // Initialize JWT manager with appID
+    jwtManager, err := jwtauth.NewManager(remoteProvider, jwtauth.WithAppID("your-app-id"))
     if err != nil {
         log.Fatalf("failed to initialize JWT manager: %v", err)
     }
