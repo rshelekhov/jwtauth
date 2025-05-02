@@ -8,9 +8,9 @@ A lightweight, secure JWT authentication library for Go applications with JSON W
 - In-memory cache for JWKS to minimize HTTP requests
 - Thread-safe JWKS operations
 - Multiple token extraction strategies:
-- - From gRPC metadata
-- - From HTTP headers (Authorization Bearer token)
-- - From HTTP cookies
+  - From gRPC metadata
+  - From HTTP headers (Authorization Bearer token)
+  - From HTTP cookies
 - Middleware support for both gRPC and HTTP servers
 - Context-based token management
 - Flexible token handling for web and mobile applications
