@@ -16,7 +16,7 @@ import (
 	"google.golang.org/grpc/metadata"
 )
 
-type manager struct {
+type Manager struct {
 	// URL to fetch JWKS from SSO service
 	jwksProvider JWKSProvider
 
@@ -30,12 +30,12 @@ type manager struct {
 	appID string
 }
 
-func NewManager(jwksProvider JWKSProvider, appID string) (Manager, error) {
+func NewManager(jwksProvider JWKSProvider, appID string) (*Manager, error) {
 	if appID == "" {
 		return nil, fmt.Errorf("appID is required")
 	}
 
-	m := &manager{
+	m := &Manager{
 		jwksProvider: jwksProvider,
 		jwksCache:    cache.New(),
 		appID:        appID,
@@ -60,7 +60,7 @@ const (
 
 // ExtractTokenFromGRPC retrieves the JWT token from gRPC metadata.
 // It expects the token to be in the "X-Access-Token" header.
-func (m *manager) ExtractTokenFromGRPC(ctx context.Context) (string, error) {
+func (m *Manager) ExtractTokenFromGRPC(ctx context.Context) (string, error) {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
 		return "", ErrNoGRPCMetadata
@@ -76,7 +76,7 @@ func (m *manager) ExtractTokenFromGRPC(ctx context.Context) (string, error) {
 
 // ExtractTokenFromHTTP retrieves the JWT token from the "Authorization" HTTP header.
 // It expects the token to be in the format "Bearer <token>".
-func (m *manager) ExtractTokenFromHTTP(r *http.Request) (string, error) {
+func (m *Manager) ExtractTokenFromHTTP(r *http.Request) (string, error) {
 	token := r.Header.Get(AuthorizationHeader)
 	if token == "" {
 		return "", ErrAuthorizationHeaderNotFoundInHTTPRequest
@@ -88,7 +88,7 @@ func (m *manager) ExtractTokenFromHTTP(r *http.Request) (string, error) {
 }
 
 // ExtractTokenFromCookies retrieves the JWT token from a cookie named "access_token".
-func (m *manager) ExtractTokenFromCookies(r *http.Request) (string, error) {
+func (m *Manager) ExtractTokenFromCookies(r *http.Request) (string, error) {
 	cookie, err := r.Cookie(AccessTokenKey)
 	if err != nil {
 		return "", fmt.Errorf("failed to get cookie: %w", err)
@@ -98,7 +98,7 @@ func (m *manager) ExtractTokenFromCookies(r *http.Request) (string, error) {
 }
 
 // ExtractRefreshTokenFromCookies retrieves the refresh token from a cookie named "refresh_token".
-func (m *manager) ExtractRefreshTokenFromCookies(r *http.Request) (string, error) {
+func (m *Manager) ExtractRefreshTokenFromCookies(r *http.Request) (string, error) {
 	cookie, err := r.Cookie(RefreshTokenKey)
 	if err != nil {
 		return "", fmt.Errorf("failed to get cookie: %w", err)
@@ -108,19 +108,19 @@ func (m *manager) ExtractRefreshTokenFromCookies(r *http.Request) (string, error
 }
 
 // FromContext returns token from context
-func (m *manager) FromContext(ctx context.Context) (string, bool) {
+func (m *Manager) FromContext(ctx context.Context) (string, bool) {
 	token, ok := ctx.Value(TokenCtxKey).(string)
 	return token, ok
 }
 
 // ToContext adds the given token to the context.
-func (m *manager) ToContext(ctx context.Context, value string) context.Context {
+func (m *Manager) ToContext(ctx context.Context, value string) context.Context {
 	return context.WithValue(ctx, TokenCtxKey, value)
 }
 
 // ParseToken parses the given access token string and validates it using the public keys (JWKS).
 // It checks the "kid" (key ID) in the token header to select the appropriate public key.
-func (m *manager) ParseToken(ctx context.Context, appID, token string) (*jwt.Token, error) {
+func (m *Manager) ParseToken(ctx context.Context, appID, token string) (*jwt.Token, error) {
 	return jwt.Parse(token, func(token *jwt.Token) (interface{}, error) {
 		kidRaw, ok := token.Header[KidTokenHeader]
 		if !ok {
@@ -164,7 +164,7 @@ func (m *manager) ParseToken(ctx context.Context, appID, token string) (*jwt.Tok
 }
 
 // ExtractUserID retrieves the user ID from the token claims.
-func (m *manager) ExtractUserID(ctx context.Context, appID string) (string, error) {
+func (m *Manager) ExtractUserID(ctx context.Context, appID string) (string, error) {
 	claims, err := m.getClaimsFromToken(ctx, appID)
 	if err != nil {
 		return "", err
@@ -179,7 +179,7 @@ func (m *manager) ExtractUserID(ctx context.Context, appID string) (string, erro
 }
 
 // getClaimsFromToken returns the claims of the provided access token.
-func (m *manager) getClaimsFromToken(ctx context.Context, appID string) (map[string]interface{}, error) {
+func (m *Manager) getClaimsFromToken(ctx context.Context, appID string) (map[string]interface{}, error) {
 	tokenString, ok := m.FromContext(ctx)
 	if !ok {
 		return nil, ErrTokenNotFoundInContext
@@ -200,7 +200,7 @@ func (m *manager) getClaimsFromToken(ctx context.Context, appID string) (map[str
 
 // verifyToken checks the validity of the provided access token.
 // It parses the token, verifies the signature, and ensures it is not expired.
-func (m *manager) verifyToken(ctx context.Context, appID, token string) error {
+func (m *Manager) verifyToken(ctx context.Context, appID, token string) error {
 	parsedToken, err := m.ParseToken(ctx, appID, token)
 	if err != nil {
 		return Errors(err)

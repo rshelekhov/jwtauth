@@ -31,7 +31,7 @@ const JWKS = "jwks"
 
 // getJWK retrieves a JWK by its key ID (kid) from the cache or fetches new JWKS if needed
 // Returns the matching JWK or an error if not found
-func (m *manager) getJWK(ctx context.Context, appID, kid string) (*JWK, error) {
+func (m *Manager) getJWK(ctx context.Context, appID, kid string) (*JWK, error) {
 	const op = "jwt.manager.getJWK"
 
 	// Construct cache key using appID
@@ -72,7 +72,7 @@ func (m *manager) getJWK(ctx context.Context, appID, kid string) (*JWK, error) {
 }
 
 // getCachedJWKS returns a cached JWKS from the cache or nil if not found
-func (m *manager) getCachedJWKS(cacheKey string) ([]JWK, bool) {
+func (m *Manager) getCachedJWKS(cacheKey string) ([]JWK, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 

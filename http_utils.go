@@ -2,6 +2,7 @@ package jwtauth
 
 import (
 	"encoding/json"
+	"maps"
 	"net/http"
 	"time"
 )
@@ -20,7 +21,7 @@ type TokenResponse struct {
 // SendTokensToWeb sends access and refresh tokens to web clients.
 // The refresh token is set in an HTTP cookie, while the access token and any additional fields
 // are sent in the JSON response body. This approach is suitable for web applications.
-func (m *manager) SendTokensToWeb(w http.ResponseWriter, resp *TokenResponse, httpStatus int) {
+func (m *Manager) SendTokensToWeb(w http.ResponseWriter, resp *TokenResponse, httpStatus int) {
 	m.setRefreshTokenCookie(w, resp)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(httpStatus)
@@ -28,9 +29,7 @@ func (m *manager) SendTokensToWeb(w http.ResponseWriter, resp *TokenResponse, ht
 	responseBody := map[string]string{AccessTokenKey: resp.AccessToken}
 
 	if len(resp.AdditionalFields) > 0 {
-		for key, value := range resp.AdditionalFields {
-			responseBody[key] = value
-		}
+		maps.Copy(responseBody, resp.AdditionalFields)
 	}
 
 	if err := json.NewEncoder(w).Encode(responseBody); err != nil {
@@ -42,7 +41,7 @@ func (m *manager) SendTokensToWeb(w http.ResponseWriter, resp *TokenResponse, ht
 // SendTokensToMobileApp sends both access and refresh tokens in the JSON response body.
 // This approach is suitable for mobile applications where cookie storage might not be optimal.
 // Additional fields can be included in the response if specified in the TokenResponse.
-func (m *manager) SendTokensToMobileApp(w http.ResponseWriter, resp *TokenResponse, httpStatus int) {
+func (m *Manager) SendTokensToMobileApp(w http.ResponseWriter, resp *TokenResponse, httpStatus int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(httpStatus)
 
@@ -52,9 +51,7 @@ func (m *manager) SendTokensToMobileApp(w http.ResponseWriter, resp *TokenRespon
 	}
 
 	if len(resp.AdditionalFields) > 0 {
-		for key, value := range resp.AdditionalFields {
-			responseBody[key] = value
-		}
+		maps.Copy(responseBody, resp.AdditionalFields)
 	}
 
 	if err := json.NewEncoder(w).Encode(responseBody); err != nil {
@@ -65,7 +62,7 @@ func (m *manager) SendTokensToMobileApp(w http.ResponseWriter, resp *TokenRespon
 
 // SetRefreshTokenCookie sets the refresh token in an HTTP cookie with the provided configuration data.
 // The cookie will be set with the specified domain, path, expiration time, and HttpOnly flag.
-func (m *manager) setRefreshTokenCookie(w http.ResponseWriter, resp *TokenResponse) {
+func (m *Manager) setRefreshTokenCookie(w http.ResponseWriter, resp *TokenResponse) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     RefreshTokenKey,
 		Value:    resp.RefreshToken,
