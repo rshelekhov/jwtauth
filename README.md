@@ -7,6 +7,8 @@ A lightweight, secure JWT authentication library for Go applications with JSON W
 - JWKS (JSON Web Key Set) support with automatic key rotation
 - In-memory cache for JWKS to minimize HTTP requests
 - Thread-safe JWKS operations
+- Configurable request timeout for JWKS fetching
+- Functional options pattern for flexible configuration
 - Multiple token extraction strategies:
   - From gRPC metadata
   - From HTTP headers (Authorization Bearer token)
@@ -64,6 +66,7 @@ package main
 
 import (
     "net/http"
+    "time"
 
     "github.com/rshelekhov/jwtauth"
 )
@@ -72,12 +75,35 @@ func main() {
     // Initialize remote JWKS provider
     remoteProvider := jwtauth.NewRemoteJWKSProvider("https://your-auth-server/.well-known/jwks.json")
 
-    // Initialize JWT manager with appID
-    jwtManager, err := jwtauth.NewManager(remoteProvider, jwtauth.WithAppID("your-app-id"))
+    // Initialize JWT manager with options
+    jwtManager, err := jwtauth.NewManager(
+        remoteProvider,
+        jwtauth.WithAppID("your-app-id"),
+        jwtauth.WithTimeout(10 * time.Second), // Custom timeout for JWKS requests
+    )
     if err != nil {
         log.Fatalf("failed to initialize JWT manager: %v", err)
     }
 }
+```
+
+### Configuration Options
+
+The library uses the functional options pattern for flexible configuration:
+
+```go
+// Set the application ID for token verification
+jwtManager, err := jwtauth.NewManager(provider, jwtauth.WithAppID("your-app-id"))
+
+// Set a custom timeout for JWKS requests (default is 5 seconds)
+jwtManager, err := jwtauth.NewManager(provider, jwtauth.WithTimeout(10 * time.Second))
+
+// Combine multiple options
+jwtManager, err := jwtauth.NewManager(
+    provider,
+    jwtauth.WithAppID("your-app-id"),
+    jwtauth.WithTimeout(3 * time.Second),
+)
 ```
 
 ### Middleware for Different Protocols
