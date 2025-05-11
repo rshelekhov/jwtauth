@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 )
 
 type (
@@ -61,7 +62,12 @@ func (p *RemoteJWKSProvider) GetJWKS(ctx context.Context, appID string) (JWKSRes
 
 	client := &http.Client{}
 
-	req, err := http.NewRequest(http.MethodGet, p.jwksURL, nil)
+	// Check if we have a timeout value in the context
+	if deadline, ok := ctx.Deadline(); ok {
+		client.Timeout = time.Until(deadline)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.jwksURL, nil)
 	if err != nil {
 		return JWKSResponse{}, fmt.Errorf("%s: failed to create HTTP request: %w", op, err)
 	}
