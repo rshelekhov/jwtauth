@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/rshelekhov/jwtauth/cache"
@@ -28,12 +29,16 @@ type Manager struct {
 
 	// App ID for verification tokens
 	appID string
+
+	// Request timeout
+	timeout time.Duration
 }
 
 func NewManager(jwksProvider JWKSProvider, opts ...Option) (*Manager, error) {
 	m := &Manager{
 		jwksProvider: jwksProvider,
 		jwksCache:    cache.New(),
+		timeout:      5 * time.Second, // Default timeout
 	}
 
 	for _, opt := range opts {
@@ -48,6 +53,12 @@ type Option func(*Manager)
 func WithAppID(appID string) Option {
 	return func(m *Manager) {
 		m.appID = appID
+	}
+}
+
+func WithTimeout(timeout time.Duration) Option {
+	return func(m *Manager) {
+		m.timeout = timeout
 	}
 }
 
@@ -125,10 +136,21 @@ func (m *Manager) ToContext(ctx context.Context, value string) context.Context {
 	return context.WithValue(ctx, TokenCtxKey, value)
 }
 
+// createTimeoutContext creates a context with the configured timeout if one is set
+func (m *Manager) createTimeoutContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if m.timeout > 0 {
+		return context.WithTimeout(ctx, m.timeout)
+	}
+	return ctx, func() {}
+}
+
 // ParseToken parses the given access token string and validates it using the public keys (JWKS).
 // It checks the "kid" (key ID) in the token header to select the appropriate public key.
 func (m *Manager) ParseToken(ctx context.Context, appID, token string) (*jwt.Token, error) {
-	return jwt.Parse(token, func(token *jwt.Token) (interface{}, error) {
+	ctx, cancel := m.createTimeoutContext(ctx)
+	defer cancel()
+
+	return jwt.Parse(token, func(token *jwt.Token) (any, error) {
 		kidRaw, ok := token.Header[KidTokenHeader]
 		if !ok {
 			return nil, ErrKidNotFoundInTokenHeader
